@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="A bold, warm website concept for Mariachi Fiesta in downtown Marshall, Minnesota." />
+    <meta name="theme-color" content="#b94427" />
+    <title>Mariachi Fiesta | Marshall, Minnesota</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=DM+Serif+Display:ital@0;1&family=Oswald:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <!-- Tailwind Play CDN keeps this concept build-free while it is still a sample. -->
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <link rel="stylesheet" href="styles.css" />
+    <script src="script.js" defer></script>
+  </head>
+  <body class="min-h-screen overflow-x-hidden antialiased selection:bg-[#b94427] selection:text-[#fff5df]">
+    <a class="skip-link" href="#main">Skip to content</a>
+
+    <div class="utility-bar relative z-[60]">
+      <a href="https://maps.google.com/?q=329+W+Main+St+Marshall+MN+56258" target="_blank" rel="noreferrer" aria-label="Open Mariachi Fiesta in Google Maps">
+        <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 22s7-6.1 7-13a7 7 0 1 0-14 0c0 6.9 7 13 7 13Zm0-9.5A3.5 3.5 0 1 1 12 5a3.5 3.5 0 0 1 0 7.5Z"/></svg>
+        <span>329 W Main St, Marshall</span>
+      </a>
+      <span class="utility-divider" aria-hidden="true"></span>
+      <a href="tel:+15075322122">
+        <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m21.3 17.3-4.6-2a1.2 1.2 0 0 0-1.4.3l-2 2.4a18.3 18.3 0 0 1-7.2-7.2l2.4-2a1.2 1.2 0 0 0 .3-1.4l-2-4.6A1.2 1.2 0 0 0 5.4 2L1.2 3A1.2 1.2 0 0 0 .3 4.2 19.8 19.8 0 0 0 20 23a1.2 1.2 0 0 0 1.2-.9l1-4.2a1.2 1.2 0 0 0-.8-1.4Z"/></svg>
+        <span>(507) 532-2122</span>
+      </a>
+      <span class="utility-note">Mon–Sat · 11–9</span>
+    </div>
+
+    <header class="site-header w-full">
+      <a class="brand shrink-0 focus-visible:outline-4 focus-visible:outline-offset-4 focus-visible:outline-[#e49a21]" href="#top" aria-label="Mariachi Fiesta home">
+        <span class="brand-sun" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
+        <span>Mariachi Fiesta</span>
+        <small>Marshall · Minnesota</small>
+      </a>
+
+      <nav class="desktop-nav items-center" aria-label="Primary navigation">
+        <a href="#menu">Menu</a>
+        <a href="#story">Our story</a>
+        <a href="#catering">Catering</a>
+        <a href="#visit">Visit</a>
+      </nav>
+
+      <a class="button button--green header-order group focus-visible:outline-4 focus-visible:outline-offset-4 focus-visible:outline-[#e49a21]" href="tel:+15075322122">
+        <span>Call to order</span><span aria-hidden="true">→</span>
+      </a>
+      <button class="menu-toggle focus-visible:outline-4 focus-visible:outline-offset-4 focus-visible:outline-[#e49a21]" type="button" aria-label="Open menu" aria-expanded="false" aria-controls="mobile-menu">
+        <span></span><span></span>
+      </button>
+    </header>
+
+    <div class="mobile-menu" id="mobile-menu" aria-hidden="true">
+      <a href="#menu">Menu</a>
+      <a href="#story">Our story</a>
+      <a href="#catering">Catering</a>
+      <a href="#visit">Visit us</a>
+      <a href="tel:+15075322122">Call (507) 532-2122</a>
+    </div>
+
+    <main class="relative" id="main">
+      <section class="hero isolate" id="top">
+        <div class="hero-copy isolate">
+          <p class="eyebrow script-accent reveal">Marshall, Minnesota</p>
+          <h1 class="reveal reveal--delay-1 text-balance">Big flavor.<br />Warm welcome.<br /><em>Always fiesta.</em></h1>
+          <div class="flourish reveal reveal--delay-2" aria-hidden="true"><span></span><b>✦</b><span></span></div>
+          <p class="hero-intro reveal reveal--delay-2">Sizzling favorites, smooth house salsa, and margaritas made for gathering in the heart of downtown.</p>
+          <div class="hero-actions reveal reveal--delay-3">
+            <a class="button button--green group focus-visible:outline-4 focus-visible:outline-offset-4 focus-visible:outline-[#e49a21]" href="tel:+15075322122"><span>Call to order</span><span aria-hidden="true">→</span></a>
+            <a class="text-link" href="#menu">See the favorites <span aria-hidden="true">↘</span></a>
+          </div>
+          <div class="local-stamp reveal reveal--delay-3" aria-label="A downtown Marshall favorite">
+            <svg viewBox="0 0 120 120" aria-hidden="true">
+              <defs><path id="stampPath" d="M60,60 m-43,0 a43,43 0 1,1 86,0 a43,43 0 1,1 -86,0" /></defs>
+              <text><textPath href="#stampPath">DOWNTOWN MARSHALL • LOCAL FAVORITE • </textPath></text>
+              <path class="stamp-star" d="m60 38 5.5 14.4L81 53l-12 9.8 4.2 14.9L60 69.2l-13.2 8.5L51 62.8 39 53l15.5-.6Z" />
+            </svg>
+          </div>
+        </div>
+
+        <div class="hero-visual reveal reveal--right">
+          <div class="pattern-ribbon" aria-hidden="true">
+            <span>✦</span><span>❋</span><span>✦</span><span>❋</span><span>✦</span>
+          </div>
+          <div class="hero-photo-wrap" data-tilt>
+            <img class="hero-photo select-none" src="https://images.unsplash.com/photo-1565299585323-38d6b0865b47?auto=format&fit=crop&w=1800&q=90" alt="A colorful spread of Mexican food with tacos, lime, and fresh salsa" />
+            <div class="photo-shade"></div>
+            <div class="sizzle-card">
+              <span class="sizzle-card__top">House favorite</span>
+              <strong>Street<br />Tacos</strong>
+              <span>Fresh · bright · loaded</span>
+            </div>
+            <div class="pepper" aria-hidden="true">
+              <svg viewBox="0 0 160 92"><path d="M149 25c-20 5-26-1-36-11 8 16 1 29-11 38C76 72 36 73 6 58c18 31 52 38 84 27 31-10 52-33 59-60Z"/><path class="pepper-stem" d="M113 14c7-9 18-12 30-10-6 3-10 8-11 15Z"/></svg>
+            </div>
+          </div>
+          <div class="hero-caption"><span>01</span><p>Made to share.<br />Hard to resist.</p></div>
+        </div>
+      </section>
+
+      <div class="ticker" aria-label="Restaurant highlights">
+        <div class="ticker-track">
+          <span>Sizzling fajitas <b>✦</b></span><span>House salsa <b>✦</b></span><span>Monster burritos <b>✦</b></span><span>Grande margaritas <b>✦</b></span><span>Downtown Marshall <b>✦</b></span>
+          <span aria-hidden="true">Sizzling fajitas <b>✦</b></span><span aria-hidden="true">House salsa <b>✦</b></span><span aria-hidden="true">Monster burritos <b>✦</b></span><span aria-hidden="true">Grande margaritas <b>✦</b></span><span aria-hidden="true">Downtown Marshall <b>✦</b></span>
+        </div>
+      </div>
+
+      <section class="favorites section-shell" id="menu">
+        <div class="section-heading reveal relative">
+          <div>
+            <p class="eyebrow">Come hungry</p>
+            <h2 class="text-balance">Marshall’s<br /><em>most wanted.</em></h2>
+          </div>
+          <p>Big plates, bold seasoning, and no shortcuts. These are the dishes locals keep coming back for.</p>
+        </div>
+
+        <div class="dish-grid relative">
+          <article class="dish-card dish-card--wide promo-card reveal" data-tilt aria-labelledby="august-specials-title">
+            <div class="promo-card__photo">
+              <img class="promo-card__image select-none" src="https://images.unsplash.com/photo-1551504734-5ee1c4a1479b?auto=format&fit=crop&w=1400&q=88" alt="A colorful spread of Mexican food for sharing" loading="lazy" />
+              <div class="promo-card__shade" aria-hidden="true"></div>
+              <span class="promo-card__date">Through August 31</span>
+              <h3 id="august-specials-title">August<br /><em>Specials</em></h3>
+            </div>
+
+            <div class="promo-card__deals">
+              <div class="promo-card__deal promo-card__deal--combo">
+                <span>Lunch special · All month</span>
+                <strong>All small<br />combos</strong>
+                <b><sup>$</sup>9<small>.99</small></b>
+              </div>
+
+              <div class="promo-card__deal promo-card__deal--margarita">
+                <svg viewBox="0 0 64 64" aria-hidden="true"><path d="M10 9h44L36 32v14h10v6H18v-6h10V32L10 9Zm12 7 10 13 10-13H22Z" /></svg>
+                <span>Fridays + Saturdays</span>
+                <strong>Margarita weekends</strong>
+                <p class="promo-card__margarita-options">
+                  <span><b>$2 off</b><small>Large margaritas</small></span>
+                  <i>or</i>
+                  <span><b>Free</b><small>Patrón tequila topper</small></span>
+                </p>
+              </div>
+            </div>
+          </article>
+
+          <article class="dish-card reveal reveal--delay-1" data-tilt>
+            <img class="select-none" src="https://images.unsplash.com/photo-1552332386-f8dd00dc2f85?auto=format&fit=crop&w=1200&q=88" alt="Fresh street tacos with lime and cilantro" loading="lazy" />
+            <div class="dish-card__content">
+              <span>02 · Handheld favorite</span>
+              <h3>Street Tacos</h3>
+              <p>Simple, fresh, and loaded with flavor.</p>
+            </div>
+          </article>
+
+          <article class="dish-card dish-card--ink reveal reveal--delay-2">
+            <div class="dish-card__number">03</div>
+            <div class="burrito-orbit" aria-hidden="true"><span>MONSTER · BURRITO · MONSTER · BURRITO · </span></div>
+            <div class="dish-card__content">
+              <span>03 · Bring an appetite</span>
+              <h3>Monster<br />Burrito</h3>
+              <p>A local legend. Go steak and make it count.</p>
+              <a href="tel:+15075322122">Order yours <span>→</span></a>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section class="salsa-story" id="story">
+        <div class="salsa-photo reveal">
+          <img class="select-none" src="https://images.unsplash.com/photo-1647403273976-06c20bed59bc?auto=format&fit=crop&w=1500&q=88" alt="Tortilla chips, fresh salsa, and a margarita on a colorful table" loading="lazy" />
+          <span class="image-label">Pass the chips</span>
+        </div>
+        <div class="salsa-copy reveal reveal--right">
+          <p class="eyebrow">The unofficial first course</p>
+          <h2 class="text-balance">It starts with<br />the <em>salsa.</em></h2>
+          <p class="lead">Smooth, bright, and just enough kick. The house salsa has a following all its own—some regulars take it home for the weekend.</p>
+          <blockquote>“Hot, fresh, and feels homemade.”</blockquote>
+          <p class="quote-source">— The way our guests describe it</p>
+          <div class="agave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+        </div>
+      </section>
+
+      <section class="catering section-shell" id="catering">
+        <div class="catering-card reveal">
+          <div class="catering-copy">
+            <p class="eyebrow">Feed the whole fiesta</p>
+            <h2 class="text-balance">Bring the<br /><em>good stuff.</em></h2>
+            <p>Office lunch, game day, graduation, or just a hungry crowd—call us and we’ll help make it delicious.</p>
+            <a class="button button--cream group focus-visible:outline-4 focus-visible:outline-offset-4 focus-visible:outline-[#e49a21]" href="tel:+15075322122"><span>Plan your feast</span><span aria-hidden="true">→</span></a>
+          </div>
+          <div class="catering-image">
+            <img class="select-none" src="https://images.unsplash.com/photo-1513456852971-30c0b8199d4d?auto=format&fit=crop&w=1400&q=88" alt="A vibrant tray of loaded nachos for sharing" loading="lazy" />
+          </div>
+          <div class="catering-burst" aria-hidden="true">¡VÁMONOS!</div>
+        </div>
+      </section>
+
+      <section class="reviews section-shell">
+        <div class="review-intro reveal">
+          <p class="eyebrow">Word on Main Street</p>
+          <h2 class="text-balance">Loved<br /><em>by locals.</em></h2>
+          <div class="rating"><strong>4.6</strong><span>★★★★★<small>Community rating</small></span></div>
+        </div>
+        <div class="review-list">
+          <blockquote class="review reveal">
+            <span>“</span>
+            <p>The food is delicious and authentic, with big portions and great flavor.</p>
+            <footer>Local guest · Marshall, MN</footer>
+          </blockquote>
+          <blockquote class="review reveal reveal--delay-1">
+            <span>“</span>
+            <p>Friendly service, generous margaritas, and the salsa is amazing.</p>
+            <footer>Returning guest</footer>
+          </blockquote>
+          <blockquote class="review reveal reveal--delay-2">
+            <span>“</span>
+            <p>If you leave hungry, it’s your own fault.</p>
+            <footer>Google review · 2026</footer>
+          </blockquote>
+        </div>
+      </section>
+
+      <section class="visit" id="visit">
+        <div class="visit-map reveal">
+          <div class="map-grid" aria-hidden="true"></div>
+          <div class="map-road map-road--one" aria-hidden="true"></div>
+          <div class="map-road map-road--two" aria-hidden="true"></div>
+          <div class="map-pin"><span></span><strong>Mariachi<br />Fiesta</strong></div>
+          <span class="map-label map-label--main">W Main St</span>
+          <span class="map-label map-label--river">Redwood River</span>
+        </div>
+        <div class="visit-copy reveal reveal--right">
+          <p class="eyebrow">Meet us downtown</p>
+          <h2 class="text-balance">Your table’s<br /><em>this way.</em></h2>
+          <address>329 W Main St<br />Marshall, MN 56258</address>
+          <div class="hours">
+            <span>Monday–Saturday</span><strong>11am–9pm</strong>
+            <span>Sunday</span><strong>Closed</strong>
+          </div>
+          <div class="visit-actions">
+            <a class="button button--green group focus-visible:outline-4 focus-visible:outline-offset-4 focus-visible:outline-[#e49a21]" href="https://maps.google.com/?q=329+W+Main+St+Marshall+MN+56258" target="_blank" rel="noreferrer"><span>Get directions</span><span aria-hidden="true">↗</span></a>
+            <a class="text-link" href="tel:+15075322122">(507) 532-2122</a>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="footer-brand">Mariachi Fiesta</div>
+      <p>Big flavor on Main Street.</p>
+      <div class="footer-links">
+        <a href="#menu">Menu</a><a href="#story">Story</a><a href="#catering">Catering</a><a href="#visit">Visit</a>
+      </div>
+      <p class="footer-note">Website concept · All restaurant details should be confirmed before launch.</p>
+    </footer>
+  </body>
+</html>
