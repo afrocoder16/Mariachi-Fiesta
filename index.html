@@ -12,13 +12,15 @@
     <!-- Tailwind Play CDN keeps this concept build-free while it is still a sample. -->
     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
     <link rel="stylesheet" href="styles.css" />
+    <script src="site-config.js" defer></script>
+    <script src="menu-data.js" defer></script>
     <script src="script.js" defer></script>
   </head>
   <body class="min-h-screen overflow-x-hidden antialiased selection:bg-[#b94427] selection:text-[#fff5df]">
     <a class="skip-link" href="#main">Skip to content</a>
 
     <div class="utility-bar relative z-[60]">
-      <a href="https://maps.google.com/?q=329+W+Main+St+Marshall+MN+56258" target="_blank" rel="noreferrer" aria-label="Open Mariachi Fiesta in Google Maps">
+      <a href="https://www.google.com/maps/place/?q=place_id:ChIJqx9J_wxZiocRCXNuQPg2Ikk" target="_blank" rel="noreferrer" aria-label="Open Mariachi Fiesta in Google Maps">
         <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 22s7-6.1 7-13a7 7 0 1 0-14 0c0 6.9 7 13 7 13Zm0-9.5A3.5 3.5 0 1 1 12 5a3.5 3.5 0 0 1 0 7.5Z"/></svg>
         <span>329 W Main St, Marshall</span>
       </a>
@@ -38,6 +40,7 @@
       </a>
 
       <nav class="desktop-nav items-center" aria-label="Primary navigation">
+        <a href="#specials">Specials</a>
         <a href="#menu">Menu</a>
         <a href="#story">Our story</a>
         <a href="#catering">Catering</a>
@@ -53,6 +56,7 @@
     </header>
 
     <div class="mobile-menu" id="mobile-menu" aria-hidden="true">
+      <a href="#specials">Specials</a>
       <a href="#menu">Menu</a>
       <a href="#story">Our story</a>
       <a href="#catering">Catering</a>
@@ -69,7 +73,7 @@
           <p class="hero-intro reveal reveal--delay-2">Sizzling favorites, smooth house salsa, and margaritas made for gathering in the heart of downtown.</p>
           <div class="hero-actions reveal reveal--delay-3">
             <a class="button button--green group focus-visible:outline-4 focus-visible:outline-offset-4 focus-visible:outline-[#e49a21]" href="tel:+15075322122"><span>Call to order</span><span aria-hidden="true">→</span></a>
-            <a class="text-link" href="#menu">See the favorites <span aria-hidden="true">↘</span></a>
+            <a class="text-link" href="#menu">See the full menu <span aria-hidden="true">↘</span></a>
           </div>
           <div class="local-stamp reveal reveal--delay-3" aria-label="A downtown Marshall favorite">
             <svg viewBox="0 0 120 120" aria-hidden="true">
@@ -107,7 +111,7 @@
         </div>
       </div>
 
-      <section class="favorites section-shell" id="menu">
+      <section class="favorites section-shell" id="specials">
         <div class="section-heading reveal relative">
           <div>
             <p class="eyebrow">Come hungry</p>
@@ -167,6 +171,46 @@
         </div>
       </section>
 
+      <section class="menu-section" id="menu" aria-labelledby="menu-title">
+        <div class="menu-inner">
+          <div class="section-heading reveal relative">
+            <div>
+              <p class="eyebrow">Everything we make</p>
+              <h2 id="menu-title" class="text-balance">The whole<br /><em>menu.</em></h2>
+            </div>
+            <p>Sizzling house specials, combination plates, street tacos, and the sides that go with everything. Pick a category or search for what you are craving.</p>
+          </div>
+
+          <div class="menu-controls reveal" role="search">
+            <div class="menu-search">
+              <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M10.5 3a7.5 7.5 0 1 1-4.7 13.4l-3.1 3.1a1.2 1.2 0 0 1-1.7-1.7l3.1-3.1A7.5 7.5 0 0 1 10.5 3Zm0 2.4a5.1 5.1 0 1 0 0 10.2 5.1 5.1 0 0 0 0-10.2Z"/></svg>
+              <input id="menu-search-input" type="search" placeholder="Search the menu…" autocomplete="off" aria-label="Search the menu" />
+              <button type="button" class="menu-search__clear" aria-label="Clear search" hidden>&times;</button>
+            </div>
+
+            <div class="menu-filters">
+              <div class="menu-filters__rail" id="menu-filters" role="group" aria-label="Filter menu by category"></div>
+            </div>
+          </div>
+
+          <p class="visually-hidden" id="menu-status" role="status"></p>
+          <div class="menu-body" id="menu-body"></div>
+
+          <p class="menu-empty" id="menu-empty" hidden>
+            No dishes match that search. <button type="button" id="menu-reset">Show the full menu</button>
+          </p>
+
+          <div class="menu-footer reveal">
+            <div>
+              <p class="eyebrow">Ready when you are</p>
+              <strong>Call it in and we&rsquo;ll have it hot.</strong>
+              <p class="menu-footer__note">Prices and availability can change. Ask about daily specials when you call.</p>
+            </div>
+            <a class="button button--cream group focus-visible:outline-4 focus-visible:outline-offset-4 focus-visible:outline-[#e49a21]" href="tel:+15075322122"><span>Call (507) 532-2122</span><span aria-hidden="true">→</span></a>
+          </div>
+        </div>
+      </section>
+
       <section class="salsa-story" id="story">
         <div class="salsa-photo reveal">
           <img class="select-none" src="https://images.unsplash.com/photo-1647403273976-06c20bed59bc?auto=format&fit=crop&w=1500&q=88" alt="Tortilla chips, fresh salsa, and a margarita on a colorful table" loading="lazy" />
@@ -197,39 +241,41 @@
         </div>
       </section>
 
-      <section class="reviews section-shell">
+      <section class="reviews section-shell" id="reviews">
         <div class="review-intro reveal">
           <p class="eyebrow">Word on Main Street</p>
           <h2 class="text-balance">Loved<br /><em>by locals.</em></h2>
-          <div class="rating"><strong>4.6</strong><span>★★★★★<small>Community rating</small></span></div>
+
+          <div class="rating">
+            <strong data-google="rating">4.4</strong>
+            <span>
+              <span class="stars" data-google="stars" role="img" aria-label="Rated 4.4 out of 5 on Google">
+                <i aria-hidden="true">★★★★★</i><b aria-hidden="true" style="width: 88%">★★★★★</b>
+              </span>
+              <small>
+                <a data-google="reviews-link" href="https://search.google.com/local/reviews?placeid=ChIJqx9J_wxZiocRCXNuQPg2Ikk" target="_blank" rel="noreferrer">
+                  <span data-google="count">425</span> Google reviews
+                </a>
+              </small>
+            </span>
+          </div>
+
+          <p class="rating-note" data-google="checked">Google rating as of August 2026.</p>
         </div>
-        <div class="review-list">
-          <blockquote class="review reveal">
-            <span>“</span>
-            <p>The food is delicious and authentic, with big portions and great flavor.</p>
-            <footer>Local guest · Marshall, MN</footer>
-          </blockquote>
-          <blockquote class="review reveal reveal--delay-1">
-            <span>“</span>
-            <p>Friendly service, generous margaritas, and the salsa is amazing.</p>
-            <footer>Returning guest</footer>
-          </blockquote>
-          <blockquote class="review reveal reveal--delay-2">
-            <span>“</span>
-            <p>If you leave hungry, it’s your own fault.</p>
-            <footer>Google review · 2026</footer>
-          </blockquote>
-        </div>
+
+        <div class="review-list" id="review-list"></div>
       </section>
 
       <section class="visit" id="visit">
         <div class="visit-map reveal">
-          <div class="map-grid" aria-hidden="true"></div>
-          <div class="map-road map-road--one" aria-hidden="true"></div>
-          <div class="map-road map-road--two" aria-hidden="true"></div>
-          <div class="map-pin"><span></span><strong>Mariachi<br />Fiesta</strong></div>
-          <span class="map-label map-label--main">W Main St</span>
-          <span class="map-label map-label--river">Redwood River</span>
+          <iframe
+            class="visit-map__frame"
+            title="Google map showing Mariachi Fiesta at 329 W Main St, Marshall, Minnesota"
+            src="https://maps.google.com/maps?q=Mariachi+Fiesta,+329+W+Main+St,+Marshall,+MN+56258&amp;z=16&amp;hl=en&amp;output=embed"
+            loading="lazy"
+            referrerpolicy="no-referrer-when-downgrade"
+            allowfullscreen
+          ></iframe>
         </div>
         <div class="visit-copy reveal reveal--right">
           <p class="eyebrow">Meet us downtown</p>
@@ -240,7 +286,7 @@
             <span>Sunday</span><strong>Closed</strong>
           </div>
           <div class="visit-actions">
-            <a class="button button--green group focus-visible:outline-4 focus-visible:outline-offset-4 focus-visible:outline-[#e49a21]" href="https://maps.google.com/?q=329+W+Main+St+Marshall+MN+56258" target="_blank" rel="noreferrer"><span>Get directions</span><span aria-hidden="true">↗</span></a>
+            <a class="button button--green group focus-visible:outline-4 focus-visible:outline-offset-4 focus-visible:outline-[#e49a21]" data-google="directions" href="https://www.google.com/maps/dir/?api=1&amp;destination=Mariachi+Fiesta%2C+329+W+Main+St%2C+Marshall%2C+MN+56258&amp;destination_place_id=ChIJqx9J_wxZiocRCXNuQPg2Ikk" target="_blank" rel="noreferrer"><span>Get directions</span><span aria-hidden="true">↗</span></a>
             <a class="text-link" href="tel:+15075322122">(507) 532-2122</a>
           </div>
         </div>
@@ -251,7 +297,7 @@
       <div class="footer-brand">Mariachi Fiesta</div>
       <p>Big flavor on Main Street.</p>
       <div class="footer-links">
-        <a href="#menu">Menu</a><a href="#story">Story</a><a href="#catering">Catering</a><a href="#visit">Visit</a>
+        <a href="#specials">Specials</a><a href="#menu">Menu</a><a href="#story">Story</a><a href="#catering">Catering</a><a href="#visit">Visit</a>
       </div>
       <p class="footer-note">Website concept · All restaurant details should be confirmed before launch.</p>
     </footer>
