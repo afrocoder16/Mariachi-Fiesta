@@ -11,9 +11,10 @@
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=DM+Serif+Display:ital@0;1&family=Oswald:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <!-- Tailwind Play CDN keeps this concept build-free while it is still a sample. -->
     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <script src="https://sandbox.web.squarecdn.com/v1/square.js"></script>
     <link rel="stylesheet" href="styles.css" />
     <script src="site-config.js" defer></script>
-    <script src="menu-data.js" defer></script>
+    <script src="shopping-cart.js" defer></script>
     <script src="script.js" defer></script>
   </head>
   <body class="min-h-screen overflow-x-hidden antialiased selection:bg-[#b94427] selection:text-[#fff5df]">
@@ -34,9 +35,7 @@
 
     <header class="site-header w-full">
       <a class="brand shrink-0 focus-visible:outline-4 focus-visible:outline-offset-4 focus-visible:outline-[#e49a21]" href="#top" aria-label="Mariachi Fiesta home">
-        <span class="brand-sun" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
-        <span>Mariachi Fiesta</span>
-        <small>Marshall · Minnesota</small>
+        <img class="brand-logo" src="images/menu/m-logo.png" alt="Mariachi Fiesta" />
       </a>
 
       <nav class="desktop-nav items-center" aria-label="Primary navigation">
@@ -194,7 +193,9 @@
           </div>
 
           <p class="visually-hidden" id="menu-status" role="status"></p>
-          <div class="menu-body" id="menu-body"></div>
+          <div class="menu-body" id="menu-body">
+            <p class="menu-loading" role="status">Loading today&rsquo;s Square menu&hellip;</p>
+          </div>
 
           <p class="menu-empty" id="menu-empty" hidden>
             No dishes match that search. <button type="button" id="menu-reset">Show the full menu</button>
@@ -293,8 +294,94 @@
       </section>
     </main>
 
+    <button class="cart-toggle" id="cart-toggle" type="button" aria-controls="cart-drawer" aria-expanded="false">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4H3v2h2l2.4 8.5A2 2 0 0 0 9.3 16H18a2 2 0 0 0 1.9-1.4L22 8H8.1L7 4Zm3 16a2 2 0 1 1-4 0 2 2 0 0 1 4 0Zm10 0a2 2 0 1 1-4 0 2 2 0 0 1 4 0Z" /></svg>
+      <span>Cart</span>
+      <b id="cart-count" aria-label="0 items">0</b>
+      <strong id="cart-toggle-total">$0.00</strong>
+    </button>
+
+    <button class="cart-backdrop" id="cart-backdrop" type="button" aria-label="Close cart" tabindex="-1"></button>
+    <aside class="cart-drawer" id="cart-drawer" aria-labelledby="cart-title" aria-hidden="true" inert>
+      <div class="cart-drawer__head">
+        <div><p class="eyebrow">Your order</p><h2 id="cart-title">The good stuff.</h2></div>
+        <button class="icon-button" id="cart-close" type="button" aria-label="Close cart">&times;</button>
+      </div>
+      <p class="cart-empty" id="cart-empty">Your cart is empty. Add something delicious from the menu.</p>
+      <ul class="cart-list" id="cart-list"></ul>
+      <div class="cart-drawer__footer">
+        <div class="cart-total"><span>Total</span><strong id="cart-total">$0.00</strong></div>
+        <p>Your total is verified against the current Square catalog before payment.</p>
+        <button class="button button--green" id="checkout-button" type="button" disabled><span>Secure checkout</span><span aria-hidden="true">&rarr;</span></button>
+      </div>
+    </aside>
+
+    <dialog class="checkout-dialog" id="checkout-dialog" aria-labelledby="checkout-title">
+      <button class="icon-button checkout-dialog__close" id="checkout-close" type="button" aria-label="Close checkout">&times;</button>
+      <p class="eyebrow">Secure Square checkout</p>
+      <h2 id="checkout-title">Pay for your order.</h2>
+      <div class="checkout-summary">
+        <span id="checkout-count">0 items</span><strong id="checkout-total">$0.00</strong>
+      </div>
+      <ol class="checkout-steps" aria-label="Checkout progress">
+        <li id="billing-step-indicator" aria-current="step">1. Billing</li>
+        <li id="payment-step-indicator">2. Payment</li>
+      </ol>
+
+      <section class="checkout-step" id="billing-step" aria-labelledby="billing-title">
+        <h3 id="billing-title">Billing contact</h3>
+        <p>Enter the billing details associated with your payment method.</p>
+        <form id="billing-contact-form">
+          <div class="billing-fields">
+            <label class="billing-field billing-field--wide">
+              <span>Full Name <b aria-hidden="true">*</b></span>
+              <input id="billing-full-name" name="fullName" type="text" autocomplete="name" required />
+            </label>
+            <label class="billing-field billing-field--wide">
+              <span>Email <b aria-hidden="true">*</b></span>
+              <input id="billing-email" name="email" type="email" autocomplete="email" required />
+            </label>
+            <label class="billing-field billing-field--wide">
+              <span>Address <b aria-hidden="true">*</b></span>
+              <input id="billing-address" name="address" type="text" autocomplete="street-address" required />
+            </label>
+            <label class="billing-field">
+              <span>City <b aria-hidden="true">*</b></span>
+              <input id="billing-city" name="city" type="text" autocomplete="address-level2" required />
+            </label>
+            <label class="billing-field billing-field--state">
+              <span>State <b aria-hidden="true">*</b></span>
+              <input id="billing-state" name="state" type="text" autocomplete="address-level1" maxlength="2" pattern="[A-Za-z]{2}" placeholder="MN" title="Enter a two-letter state code" required />
+            </label>
+            <label class="billing-field billing-field--postal">
+              <span>Postal Code <b aria-hidden="true">*</b></span>
+              <input id="billing-postal-code" name="postalCode" type="text" inputmode="numeric" autocomplete="postal-code" pattern="[0-9]{5}(-[0-9]{4})?" placeholder="56258" title="Enter a five-digit ZIP code or ZIP+4" required />
+            </label>
+          </div>
+          <button class="button button--green checkout-continue" type="submit">
+            <span>Continue to payment</span><span aria-hidden="true">&rarr;</span>
+          </button>
+        </form>
+      </section>
+
+      <section class="checkout-step" id="payment-step" aria-labelledby="payment-title" hidden>
+        <div class="checkout-step__head">
+          <div><h3 id="payment-title">Card payment</h3><p>Payment details are securely collected by Square.</p></div>
+          <button class="checkout-back" id="billing-back" type="button">&larr; Edit billing</button>
+        </div>
+        <form id="payment-form">
+          <div class="square-card" id="card-container" aria-label="Card details"></div>
+          <p class="sandbox-note">Sandbox test card: 4111 1111 1111 1111, any future expiry, CVV 111, postal code 55555.</p>
+          <button class="button button--green payment-submit" id="payment-submit" type="submit" disabled>
+            <span id="payment-submit-label">Pay securely</span><span aria-hidden="true">&rarr;</span>
+          </button>
+        </form>
+      </section>
+      <p class="payment-status" id="payment-status" role="alert" aria-live="assertive"></p>
+    </dialog>
+
     <footer class="site-footer">
-      <div class="footer-brand">Mariachi Fiesta</div>
+      <img class="footer-logo" src="images/menu/m-logo.png" alt="Mariachi Fiesta" loading="lazy" />
       <p>Big flavor on Main Street.</p>
       <div class="footer-links">
         <a href="#specials">Specials</a><a href="#menu">Menu</a><a href="#story">Story</a><a href="#catering">Catering</a><a href="#visit">Visit</a>

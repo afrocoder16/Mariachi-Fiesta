@@ -324,3 +324,451 @@ if (menuBody && menuFilters && Array.isArray(menuData)) {
   items.forEach((item) => item.classList.add('is-visible'));
   applyFilters();
 }
+
+/* ---------- Live Square menu, cart and payments ---------- */
+
+(function initializeSquareOrdering() {
+  if (!menuBody || !menuFilters || !window.shoppingCart) return;
+
+  const cart = window.shoppingCart;
+  const cartToggle = document.getElementById('cart-toggle');
+  const cartBackdrop = document.getElementById('cart-backdrop');
+  const cartDrawer = document.getElementById('cart-drawer');
+  const cartClose = document.getElementById('cart-close');
+  const cartList = document.getElementById('cart-list');
+  const cartEmpty = document.getElementById('cart-empty');
+  const cartCount = document.getElementById('cart-count');
+  const cartToggleTotal = document.getElementById('cart-toggle-total');
+  const cartTotal = document.getElementById('cart-total');
+  const checkoutButton = document.getElementById('checkout-button');
+  const checkoutDialog = document.getElementById('checkout-dialog');
+  const checkoutClose = document.getElementById('checkout-close');
+  const checkoutCount = document.getElementById('checkout-count');
+  const checkoutTotal = document.getElementById('checkout-total');
+  const billingStep = document.getElementById('billing-step');
+  const paymentStep = document.getElementById('payment-step');
+  const billingStepIndicator = document.getElementById('billing-step-indicator');
+  const paymentStepIndicator = document.getElementById('payment-step-indicator');
+  const billingContactForm = document.getElementById('billing-contact-form');
+  const billingBack = document.getElementById('billing-back');
+  const paymentForm = document.getElementById('payment-form');
+  const paymentSubmit = document.getElementById('payment-submit');
+  const paymentSubmitLabel = document.getElementById('payment-submit-label');
+  const paymentStatus = document.getElementById('payment-status');
+
+  const liveItems = new Map();
+  let liveGroups = [];
+  let liveCategory = 'all';
+  let squareCard;
+  let cardInitialization;
+  let lastFocusedElement;
+
+  const escapeSquareHtml = (value) =>
+    String(value ?? '').replace(/[&<>"]/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[character]));
+
+  const formatMoney = (amount, currency = 'USD') =>
+    new Intl.NumberFormat('en-US', { style: 'currency', currency }).format((Number(amount) || 0) / 100);
+
+  const itemCountLabel = (count) => `${count} ${count === 1 ? 'item' : 'items'}`;
+  async function fetchJson(url, options) {
+    const response = await fetch(url, options);
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || `Request failed with HTTP ${response.status}`);
+    return payload;
+  }
+
+  const squareConfigPromise = fetchJson('/api/config').then((config) => {
+    console.log(`[Square] Public config loaded: ${config.environment}, location ${config.locationId}`);
+    return config;
+  });
+
+  function priceLabel(variations) {
+    const prices = variations.map((variation) => variation.price);
+    const currency = variations[0]?.currency || 'USD';
+    const minimum = Math.min(...prices);
+    const maximum = Math.max(...prices);
+    return minimum === maximum ? formatMoney(minimum, currency) : `${formatMoney(minimum, currency)} – ${formatMoney(maximum, currency)}`;
+  }
+
+  function renderSquareMenu(groups) {
+    liveGroups = groups;
+    liveItems.clear();
+    groups.forEach((group) => group.items.forEach((item) => liveItems.set(item.id, item)));
+
+    const catalogCartItems = groups.flatMap((group) =>
+      group.items.flatMap((item) =>
+        item.variations.map((variation) => ({
+          variationId: variation.id,
+          name: item.name,
+          variationName: variation.name,
+          price: variation.price,
+          currency: variation.currency,
+          quantity: 1,
+        }))
+      )
+    );
+    const removedItems = cart.syncWithCatalog(catalogCartItems);
+    if (removedItems) console.warn(`[Square] Removed ${removedItems} unavailable item(s) from the saved cart`);
+
+    menuFilters.innerHTML = [
+      '<button class="menu-chip" type="button" data-category="all" aria-pressed="true">All</button>',
+      ...groups.map(
+        (group) =>
+          `<button class="menu-chip" type="button" data-category="${escapeSquareHtml(group.id)}" aria-pressed="false">${escapeSquareHtml(group.title)}</button>`
+      ),
+    ].join('');
+
+    menuBody.innerHTML = groups
+      .map((group) => {
+        const items = group.items
+          .map((item) => {
+            const imageUrl = item.imageUrl || '';
+            const thumbnail = imageUrl
+              ? `<span class="menu-item__thumb"><img src="${escapeSquareHtml(imageUrl)}" alt="${escapeSquareHtml(item.name)}" loading="lazy" decoding="async" /></span>`
+              : '';
+            const description = item.description ? `<p class="menu-item__desc">${escapeSquareHtml(item.description)}</p>` : '';
+            const options = item.variations
+              .map(
+                (variation) =>
+                  `<option value="${escapeSquareHtml(variation.id)}">${escapeSquareHtml(variation.name)} · ${formatMoney(variation.price, variation.currency)}</option>`
+              )
+              .join('');
+            const selector =
+              item.variations.length > 1
+                ? `<label class="menu-item__variation"><span class="visually-hidden">Choose a ${escapeSquareHtml(item.name)} option</span><select>${options}</select></label>`
+                : `<input type="hidden" value="${escapeSquareHtml(item.variations[0].id)}" />`;
+            const haystack = `${item.name} ${item.description || ''} ${group.title}`.toLowerCase();
+
+            return `<li class="menu-item${imageUrl ? ' menu-item--photo' : ''}" data-item-id="${escapeSquareHtml(item.id)}" data-search="${escapeSquareHtml(haystack)}">
+              ${thumbnail}
+              <span class="menu-item__top">
+                <h4 class="menu-item__name">${escapeSquareHtml(item.name)}</h4>
+                <span class="menu-item__leader" aria-hidden="true"></span>
+                <span class="menu-item__price">${priceLabel(item.variations)}</span>
+              </span>
+              ${description}
+              <span class="menu-item__order">${selector}<button class="add-to-cart" type="button">Add to cart</button></span>
+            </li>`;
+          })
+          .join('');
+
+        return `<div class="menu-group" data-category="${escapeSquareHtml(group.id)}">
+          <div class="menu-group__head"><h3>${escapeSquareHtml(group.title)}</h3><span class="menu-group__rule" aria-hidden="true"></span><span class="menu-group__count"></span></div>
+          <ul class="menu-list">${items}</ul>
+        </div>`;
+      })
+      .join('');
+
+    menuBody.querySelectorAll('.menu-item').forEach((item) => item.classList.add('is-visible'));
+    applySquareFilters();
+  }
+
+  function applySquareFilters() {
+    const query = (menuSearch?.value || '').trim().toLowerCase();
+    let visibleTotal = 0;
+
+    menuBody.querySelectorAll('.menu-group').forEach((group) => {
+      const categoryMatches = liveCategory === 'all' || group.dataset.category === liveCategory;
+      let groupCount = 0;
+      group.querySelectorAll('.menu-item').forEach((item) => {
+        const matches = categoryMatches && (!query || item.dataset.search.includes(query));
+        item.hidden = !matches;
+        if (matches) groupCount += 1;
+      });
+      group.hidden = groupCount === 0;
+      const count = group.querySelector('.menu-group__count');
+      if (count) count.textContent = itemCountLabel(groupCount);
+      visibleTotal += groupCount;
+    });
+
+    if (menuEmpty) menuEmpty.hidden = visibleTotal > 0;
+    if (menuClear) menuClear.hidden = query.length === 0;
+    if (menuStatus) menuStatus.textContent = `${visibleTotal} ${visibleTotal === 1 ? 'dish' : 'dishes'} shown.`;
+  }
+
+  menuFilters.addEventListener('click', (event) => {
+    const chip = event.target.closest('.menu-chip');
+    if (!chip || !liveGroups.length) return;
+    liveCategory = chip.dataset.category;
+    menuFilters.querySelectorAll('.menu-chip').forEach((button) => button.setAttribute('aria-pressed', String(button === chip)));
+    chip.scrollIntoView({ block: 'nearest', inline: 'center', behavior: reduceMotion ? 'auto' : 'smooth' });
+    applySquareFilters();
+  });
+
+  menuSearch?.addEventListener('input', applySquareFilters);
+  menuClear?.addEventListener('click', () => {
+    menuSearch.value = '';
+    menuSearch.focus();
+    applySquareFilters();
+  });
+  menuReset?.addEventListener('click', () => {
+    menuSearch.value = '';
+    liveCategory = 'all';
+    menuFilters.querySelectorAll('.menu-chip').forEach((button) => button.setAttribute('aria-pressed', String(button.dataset.category === 'all')));
+    applySquareFilters();
+  });
+
+  menuBody.addEventListener('error', (event) => {
+    if (event.target instanceof HTMLImageElement) {
+      const row = event.target.closest('.menu-item');
+      event.target.closest('.menu-item__thumb')?.remove();
+      row?.classList.remove('menu-item--photo');
+    }
+  }, true);
+
+  menuBody.addEventListener('click', (event) => {
+    const button = event.target.closest('.add-to-cart');
+    if (!button) return;
+    const row = button.closest('.menu-item');
+    const item = liveItems.get(row.dataset.itemId);
+    const variationId = row.querySelector('select, input[type="hidden"]')?.value;
+    const variation = item?.variations.find((entry) => entry.id === variationId);
+    if (!item || !variation) return;
+
+    cart.addItem({
+      variationId: variation.id,
+      name: item.name,
+      variationName: variation.name,
+      price: variation.price,
+      currency: variation.currency,
+      quantity: 1,
+    });
+    button.textContent = 'Added!';
+    setTimeout(() => (button.textContent = 'Add to cart'), 900);
+  });
+
+  function openCart() {
+    lastFocusedElement = document.activeElement;
+    cartDrawer.setAttribute('aria-hidden', 'false');
+    cartDrawer.inert = false;
+    cartToggle.setAttribute('aria-expanded', 'true');
+    document.body.classList.add('cart-is-open');
+    cartClose.focus();
+  }
+
+  function closeCart() {
+    cartDrawer.setAttribute('aria-hidden', 'true');
+    cartDrawer.inert = true;
+    cartToggle.setAttribute('aria-expanded', 'false');
+    document.body.classList.remove('cart-is-open');
+    if (lastFocusedElement instanceof HTMLElement) lastFocusedElement.focus();
+  }
+
+  function renderCart(items) {
+    const totalQuantity = items.reduce((count, item) => count + item.quantity, 0);
+    const total = cart.calculateTotal();
+    const currency = items[0]?.currency || 'USD';
+    const formattedTotal = formatMoney(total, currency);
+
+    cartCount.textContent = String(totalQuantity);
+    cartCount.setAttribute('aria-label', itemCountLabel(totalQuantity));
+    cartToggleTotal.textContent = formattedTotal;
+    cartTotal.textContent = formattedTotal;
+    checkoutTotal.textContent = formattedTotal;
+    checkoutCount.textContent = itemCountLabel(totalQuantity);
+    cartEmpty.hidden = items.length > 0;
+    checkoutButton.disabled = items.length === 0;
+
+    cartList.innerHTML = items
+      .map(
+        (item) => `<li class="cart-line" data-variation-id="${escapeSquareHtml(item.variationId)}">
+          <div><strong>${escapeSquareHtml(item.name)}</strong><span>${escapeSquareHtml(item.variationName === 'Regular' ? '' : item.variationName || '')}</span></div>
+          <span class="cart-line__price">${formatMoney(item.price * item.quantity, item.currency)}</span>
+          <div class="quantity-control" aria-label="Quantity for ${escapeSquareHtml(item.name)}">
+            <button type="button" data-cart-action="decrease" aria-label="Decrease quantity">−</button><b>${item.quantity}</b><button type="button" data-cart-action="increase" aria-label="Increase quantity">+</button>
+          </div>
+          <button class="cart-line__remove" type="button" data-cart-action="remove">Remove</button>
+        </li>`
+      )
+      .join('');
+  }
+
+  cartList.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-cart-action]');
+    if (!button) return;
+    const variationId = button.closest('.cart-line').dataset.variationId;
+    const item = cart.getItems().find((entry) => entry.variationId === variationId);
+    if (!item) return;
+    if (button.dataset.cartAction === 'increase') cart.updateQuantity(variationId, item.quantity + 1);
+    if (button.dataset.cartAction === 'decrease') cart.updateQuantity(variationId, item.quantity - 1);
+    if (button.dataset.cartAction === 'remove') cart.removeItem(variationId);
+  });
+
+  cartToggle.addEventListener('click', openCart);
+  cartClose.addEventListener('click', closeCart);
+  cartBackdrop.addEventListener('click', closeCart);
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && document.body.classList.contains('cart-is-open')) closeCart();
+  });
+  cart.subscribe(renderCart);
+
+  function showBillingStep() {
+    billingStep.hidden = false;
+    paymentStep.hidden = true;
+    paymentForm.hidden = false;
+    billingStepIndicator.setAttribute('aria-current', 'step');
+    paymentStepIndicator.removeAttribute('aria-current');
+    paymentStatus.className = 'payment-status';
+    paymentStatus.textContent = '';
+  }
+
+  function showPaymentStep() {
+    billingStep.hidden = true;
+    paymentStep.hidden = false;
+    billingStepIndicator.removeAttribute('aria-current');
+    paymentStepIndicator.setAttribute('aria-current', 'step');
+  }
+
+  function getBillingContact() {
+    const fields = new FormData(billingContactForm);
+    const fullName = String(fields.get('fullName') || '').trim().replace(/\s+/g, ' ');
+    const nameParts = fullName.split(' ').filter(Boolean);
+    const familyName = nameParts.length > 1 ? nameParts.pop() : '';
+    const givenName = nameParts.join(' ') || fullName;
+
+    return {
+      givenName,
+      familyName,
+      email: String(fields.get('email') || '').trim(),
+      addressLines: [String(fields.get('address') || '').trim()],
+      city: String(fields.get('city') || '').trim(),
+      state: String(fields.get('state') || '').trim().toUpperCase(),
+      countryCode: 'US',
+      postalCode: String(fields.get('postalCode') || '').trim(),
+    };
+  }
+
+  async function initializeCard() {
+    if (squareCard) {
+      paymentSubmit.disabled = false;
+      return squareCard;
+    }
+    if (cardInitialization) return cardInitialization;
+
+    cardInitialization = (async () => {
+      paymentStatus.textContent = 'Loading secure card fields…';
+      const config = await squareConfigPromise;
+      if (!window.Square) throw new Error('Square Web Payments SDK did not load.');
+      const payments = window.Square.payments(config.applicationId, config.locationId);
+      squareCard = await payments.card();
+      await squareCard.attach('#card-container');
+      paymentStatus.textContent = '';
+      paymentSubmit.disabled = false;
+      console.log('[Square] Web Payments card form initialized');
+      return squareCard;
+    })().catch((error) => {
+      cardInitialization = null;
+      paymentStatus.textContent = error.message;
+      console.error('[Square] Card form initialization failed:', error.message);
+      throw error;
+    });
+
+    return cardInitialization;
+  }
+
+  checkoutButton.addEventListener('click', () => {
+    closeCart();
+    checkoutDialog.showModal();
+    showBillingStep();
+    document.getElementById('billing-full-name')?.focus();
+  });
+
+  billingContactForm.addEventListener('submit', (event) => {
+    event.preventDefault();
+
+    const requiredFields = billingContactForm.querySelectorAll('input[required]');
+    requiredFields.forEach((field) => field.setCustomValidity(field.value.trim() ? '' : 'This field is required.'));
+    if (!billingContactForm.reportValidity()) return;
+
+    const stateField = document.getElementById('billing-state');
+    stateField.value = stateField.value.trim().toUpperCase();
+    showPaymentStep();
+    initializeCard().catch(() => {});
+  });
+
+  billingContactForm.addEventListener('input', (event) => event.target.setCustomValidity(''));
+  billingBack.addEventListener('click', () => {
+    showBillingStep();
+    document.getElementById('billing-full-name')?.focus();
+  });
+
+  checkoutClose.addEventListener('click', () => checkoutDialog.close());
+  checkoutDialog.addEventListener('click', (event) => {
+    if (event.target === checkoutDialog) checkoutDialog.close();
+  });
+
+  paymentForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const items = cart.getItems();
+    if (!items.length) return;
+
+    paymentSubmit.disabled = true;
+    paymentSubmitLabel.textContent = 'Processing…';
+    paymentStatus.className = 'payment-status';
+    paymentStatus.textContent = '';
+
+    try {
+      const card = await initializeCard();
+      const config = await squareConfigPromise;
+      const tokenResult = await card.tokenize({
+        amount: (cart.calculateTotal() / 100).toFixed(2),
+        currencyCode: items[0]?.currency || config.currency,
+        intent: 'CHARGE',
+        customerInitiated: true,
+        sellerKeyedIn: false,
+        billingContact: getBillingContact(),
+      });
+      if (tokenResult.status !== 'OK') {
+        const details = (tokenResult.errors || []).map((error) => error.message).filter(Boolean).join(' ');
+        throw new Error(details || `Card tokenization failed (${tokenResult.status}).`);
+      }
+
+      console.log('[Square] Card tokenized; sending payment request');
+      const result = await fetchJson('/api/payments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sourceId: tokenResult.token,
+          idempotencyKey: window.crypto.randomUUID(),
+          cart: items.map((item) => ({ variationId: item.variationId, quantity: item.quantity })),
+        }),
+      });
+
+      console.log(`[Square] Payment ${result.payment.status}: ${result.payment.id}`);
+      cart.clear();
+      paymentStep.hidden = true;
+      billingContactForm.reset();
+      paymentStatus.className = 'payment-status is-success';
+      paymentStatus.textContent = `Payment successful — ${formatMoney(result.payment.amount, result.payment.currency)} paid.`;
+      if (result.payment.receiptUrl) {
+        const receipt = document.createElement('a');
+        receipt.href = result.payment.receiptUrl;
+        receipt.target = '_blank';
+        receipt.rel = 'noreferrer';
+        receipt.textContent = ' View Square receipt.';
+        paymentStatus.append(receipt);
+      }
+    } catch (error) {
+      paymentStatus.textContent = error.message || 'Payment could not be completed. Please try again.';
+      console.error('[Square] Payment failed:', error.message);
+      paymentSubmit.disabled = false;
+    } finally {
+      paymentSubmitLabel.textContent = 'Pay securely';
+    }
+  });
+
+  console.log('[Square] Requesting catalog menu from /api/menu');
+  fetchJson('/api/menu')
+    .then(({ categories }) => {
+      if (!Array.isArray(categories) || !categories.length) throw new Error('No purchasable items are available in the Square catalog.');
+      renderSquareMenu(categories);
+      const count = categories.reduce((sum, category) => sum + category.items.length, 0);
+      console.log(`[Square] Menu rendered: ${count} items in ${categories.length} categories`);
+    })
+    .catch((error) => {
+      menuFilters.innerHTML = '';
+      menuBody.innerHTML = `<p class="menu-load-error" role="alert"><strong>We couldn’t load the live menu.</strong><br>${escapeSquareHtml(error.message)} Please refresh or call (507) 532-2122.</p>`;
+      if (menuStatus) menuStatus.textContent = 'The Square menu could not be loaded.';
+      console.error('[Square] Catalog request failed:', error.message);
+    });
+})();
