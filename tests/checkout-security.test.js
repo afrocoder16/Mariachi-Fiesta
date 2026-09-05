@@ -6,6 +6,7 @@ process.env.SQUARE_ENVIRONMENT = 'sandbox';
 process.env.SQUARE_APPLICATION_ID = 'sandbox-test-app';
 process.env.SQUARE_ACCESS_TOKEN = 'sandbox-test-token';
 process.env.SQUARE_LOCATION_ID = 'TEST_LOCATION';
+process.env.PORT = '0';
 
 const catalog = {
   objects: [
@@ -166,7 +167,7 @@ test('rate limits menu requests and does not expose the diagnostic route', async
   const calls = [];
   installSquareMock(calls);
   const { server } = require('../server');
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  if (!server.listening) await new Promise((resolve) => server.once('listening', resolve));
   const port = server.address().port;
 
   try {

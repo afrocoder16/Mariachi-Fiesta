@@ -18,7 +18,8 @@ function loadEnv(filePath) {
 loadEnv(path.join(ROOT, '.env'));
 
 const { SquareApiError, createCheckoutRequest, createPaymentRequest, fetchMenuItems, getPublicConfig } = require('./square-config');
-const port = Number(process.env.PORT) || 3000;
+const configuredPort = Number(process.env.PORT);
+const port = Number.isInteger(configuredPort) && configuredPort >= 0 ? configuredPort : 3000;
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const RATE_LIMIT_MAX = 10;
 const rateLimitedPaths = new Set(['/api/menu', '/api/checkout', '/api/payments']);
@@ -188,10 +189,10 @@ const server = http.createServer(async (request, response) => {
   }
 });
 
-if (require.main === module) {
-  server.listen(port, () => {
-    console.log(`[Server] Mariachi Fiesta is running at http://localhost:${port}`);
-  });
-}
+server.listen(port, () => {
+  const address = server.address();
+  const listeningPort = typeof address === 'object' && address ? address.port : port;
+  console.log(`[Server] Mariachi Fiesta is running on port ${listeningPort}`);
+});
 
 module.exports = { server };
