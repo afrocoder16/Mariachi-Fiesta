@@ -3,22 +3,49 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="A bold, warm website concept for Mariachi Fiesta in downtown Marshall, Minnesota." />
+    <meta name="description" content="Mariachi Fiesta serves Mexican favorites, house salsa, and margaritas at 329 W Main St in Marshall, Minnesota—serving the community since 2001." />
     <meta name="theme-color" content="#b94427" />
+    <meta property="og:title" content="Mariachi Fiesta | Marshall, Minnesota" />
+    <meta property="og:description" content="Order Mexican favorites online for pickup from Mariachi Fiesta in downtown Marshall." />
+    <meta property="og:type" content="website" />
+    <meta property="og:locale" content="en_US" />
     <title>Mariachi Fiesta | Marshall, Minnesota</title>
+    <link rel="icon" type="image/webp" href="images/menu/m-logo.webp" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=DM+Serif+Display:ital@0;1&family=Oswald:wght@400;500;600;700&display=swap" rel="stylesheet" />
-    <!-- Tailwind Play CDN keeps this concept build-free while it is still a sample. -->
-    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
-    <script src="https://sandbox.web.squarecdn.com/v1/square.js"></script>
     <link rel="stylesheet" href="styles.css" />
     <script src="site-config.js" defer></script>
     <script src="shopping-cart.js" defer></script>
     <script src="script.js" defer></script>
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "Restaurant",
+        "name": "Mariachi Fiesta",
+        "servesCuisine": "Mexican",
+        "telephone": "+1-507-532-2122",
+        "priceRange": "$$",
+        "address": {
+          "@type": "PostalAddress",
+          "streetAddress": "329 W Main St",
+          "addressLocality": "Marshall",
+          "addressRegion": "MN",
+          "postalCode": "56258",
+          "addressCountry": "US"
+        },
+        "openingHoursSpecification": [{
+          "@type": "OpeningHoursSpecification",
+          "dayOfWeek": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"],
+          "opens": "11:00",
+          "closes": "21:00"
+        }]
+      }
+    </script>
   </head>
   <body class="min-h-screen overflow-x-hidden antialiased selection:bg-[#b94427] selection:text-[#fff5df]">
     <a class="skip-link" href="#main">Skip to content</a>
+    <div class="scroll-progress" aria-hidden="true"><span id="scroll-progress-bar"></span></div>
 
     <div class="utility-bar relative z-[60]">
       <a href="https://www.google.com/maps/place/?q=place_id:ChIJqx9J_wxZiocRCXNuQPg2Ikk" target="_blank" rel="noreferrer" aria-label="Open Mariachi Fiesta in Google Maps">
@@ -30,12 +57,12 @@
         <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m21.3 17.3-4.6-2a1.2 1.2 0 0 0-1.4.3l-2 2.4a18.3 18.3 0 0 1-7.2-7.2l2.4-2a1.2 1.2 0 0 0 .3-1.4l-2-4.6A1.2 1.2 0 0 0 5.4 2L1.2 3A1.2 1.2 0 0 0 .3 4.2 19.8 19.8 0 0 0 20 23a1.2 1.2 0 0 0 1.2-.9l1-4.2a1.2 1.2 0 0 0-.8-1.4Z"/></svg>
         <span>(507) 532-2122</span>
       </a>
-      <span class="utility-note">Mon–Sat · 11–9</span>
+      <a class="utility-order" href="#menu">Online ordering available <span aria-hidden="true">→</span></a>
     </div>
 
     <header class="site-header w-full">
       <a class="brand shrink-0 focus-visible:outline-4 focus-visible:outline-offset-4 focus-visible:outline-[#e49a21]" href="#top" aria-label="Mariachi Fiesta home">
-        <img class="brand-logo" src="images/menu/m-logo.png" alt="Mariachi Fiesta" />
+        <img class="brand-logo" src="images/menu/m-logo.webp" alt="Mariachi Fiesta" decoding="async" />
       </a>
 
       <nav class="desktop-nav items-center" aria-label="Primary navigation">
@@ -46,15 +73,16 @@
         <a href="#visit">Visit</a>
       </nav>
 
-      <a class="button button--green header-order group focus-visible:outline-4 focus-visible:outline-offset-4 focus-visible:outline-[#e49a21]" href="tel:+15075322122">
-        <span>Call to order</span><span aria-hidden="true">→</span>
+      <a class="button button--green header-order group focus-visible:outline-4 focus-visible:outline-offset-4 focus-visible:outline-[#e49a21]" href="#menu">
+        <span>Start an order</span><span aria-hidden="true">→</span>
       </a>
       <button class="menu-toggle focus-visible:outline-4 focus-visible:outline-offset-4 focus-visible:outline-[#e49a21]" type="button" aria-label="Open menu" aria-expanded="false" aria-controls="mobile-menu">
         <span></span><span></span>
       </button>
     </header>
 
-    <div class="mobile-menu" id="mobile-menu" aria-hidden="true">
+    <div class="mobile-menu" id="mobile-menu" aria-hidden="true" inert>
+      <a href="#menu">Order online</a>
       <a href="#specials">Specials</a>
       <a href="#menu">Menu</a>
       <a href="#story">Our story</a>
@@ -71,8 +99,8 @@
           <div class="flourish reveal reveal--delay-2" aria-hidden="true"><span></span><b>✦</b><span></span></div>
           <p class="hero-intro reveal reveal--delay-2">Sizzling favorites, smooth house salsa, and margaritas made for gathering in the heart of downtown.</p>
           <div class="hero-actions reveal reveal--delay-3">
-            <a class="button button--green group focus-visible:outline-4 focus-visible:outline-offset-4 focus-visible:outline-[#e49a21]" href="tel:+15075322122"><span>Call to order</span><span aria-hidden="true">→</span></a>
-            <a class="text-link" href="#menu">See the full menu <span aria-hidden="true">↘</span></a>
+            <a class="button button--green group focus-visible:outline-4 focus-visible:outline-offset-4 focus-visible:outline-[#e49a21]" href="#menu"><span>Order online</span><span aria-hidden="true">→</span></a>
+            <a class="text-link" href="tel:+15075322122">Call us <span aria-hidden="true">↗</span></a>
           </div>
           <div class="local-stamp reveal reveal--delay-3" aria-label="A downtown Marshall favorite">
             <svg viewBox="0 0 120 120" aria-hidden="true">
@@ -88,7 +116,7 @@
             <span>✦</span><span>❋</span><span>✦</span><span>❋</span><span>✦</span>
           </div>
           <div class="hero-photo-wrap" data-tilt>
-            <img class="hero-photo select-none" src="https://images.unsplash.com/photo-1565299585323-38d6b0865b47?auto=format&fit=crop&w=1800&q=90" alt="A colorful spread of Mexican food with tacos, lime, and fresh salsa" />
+            <img class="hero-photo select-none" src="https://images.unsplash.com/photo-1565299585323-38d6b0865b47?auto=format&fit=crop&w=1800&q=90" alt="A colorful spread of Mexican food with tacos, lime, and fresh salsa" fetchpriority="high" decoding="async" />
             <div class="photo-shade"></div>
             <div class="sizzle-card">
               <span class="sizzle-card__top">House favorite</span>
@@ -110,64 +138,43 @@
         </div>
       </div>
 
-      <section class="favorites section-shell" id="specials">
-        <div class="section-heading reveal relative">
+      <section class="weekly-feature section-shell" id="specials" aria-labelledby="weekly-feature-title">
+        <div class="weekly-feature__heading reveal relative">
           <div>
-            <p class="eyebrow">Come hungry</p>
-            <h2 class="text-balance">Marshall’s<br /><em>most wanted.</em></h2>
+            <p class="eyebrow">This week at Mariachi Fiesta</p>
+            <h2 class="text-balance" id="weekly-feature-title">Marshall’s<br /><em>most wanted.</em></h2>
           </div>
-          <p>Big plates, bold seasoning, and no shortcuts. These are the dishes locals keep coming back for.</p>
+          <div class="weekly-feature__anniversary" aria-label="Mariachi Fiesta 25th anniversary weekly feature">
+            <span>Anniversary feature</span>
+            <strong>25 years</strong>
+            <p>One celebratory dish, served all week.</p>
+          </div>
         </div>
 
-        <div class="dish-grid relative">
-          <article class="dish-card dish-card--wide promo-card reveal" data-tilt aria-labelledby="august-specials-title">
-            <div class="promo-card__photo">
-              <img class="promo-card__image select-none" src="https://images.unsplash.com/photo-1551504734-5ee1c4a1479b?auto=format&fit=crop&w=1400&q=88" alt="A colorful spread of Mexican food for sharing" loading="lazy" />
-              <div class="promo-card__shade" aria-hidden="true"></div>
-              <span class="promo-card__date">Through August 31</span>
-              <h3 id="august-specials-title">August<br /><em>Specials</em></h3>
-            </div>
+        <article class="weekly-promo relative">
+          <figure class="weekly-promo__media reveal reveal--scale" data-parallax>
+            <img class="select-none" src="images/menu/anniversary-molcajete.webp" alt="Traditional molcajete filled with grilled meats, shrimp, cactus, and melted cheese beside rice and beans" loading="lazy" decoding="async" />
+            <span class="weekly-promo__badge" aria-hidden="true">All<br />week</span>
+            <figcaption>Served sizzling with a side plate of rice and beans.</figcaption>
+          </figure>
 
-            <div class="promo-card__deals">
-              <div class="promo-card__deal promo-card__deal--combo">
-                <span>Lunch special · All month</span>
-                <strong>All small<br />combos</strong>
-                <b><sup>$</sup>9<small>.99</small></b>
-              </div>
-
-              <div class="promo-card__deal promo-card__deal--margarita">
-                <svg viewBox="0 0 64 64" aria-hidden="true"><path d="M10 9h44L36 32v14h10v6H18v-6h10V32L10 9Zm12 7 10 13 10-13H22Z" /></svg>
-                <span>Fridays + Saturdays</span>
-                <strong>Margarita weekends</strong>
-                <p class="promo-card__margarita-options">
-                  <span><b>$2 off</b><small>Large margaritas</small></span>
-                  <i>or</i>
-                  <span><b>Free</b><small>Patrón tequila topper</small></span>
-                </p>
-              </div>
+          <div class="weekly-promo__copy reveal reveal--right">
+            <p class="eyebrow">A quarter century of flavor</p>
+            <h3>Traditional<br /><em>Molcajete</em></h3>
+            <p class="weekly-promo__lead">We&rsquo;re celebrating 25 years in Marshall with a feast made for the occasion.</p>
+            <ul class="weekly-promo__ingredients" aria-label="Molcajete highlights">
+              <li>Grilled meats</li>
+              <li>Shrimp</li>
+              <li>Cactus</li>
+              <li>Rice &amp; beans</li>
+            </ul>
+            <p class="weekly-promo__note"><strong>Anniversary week only.</strong> Gather your people and come hungry.</p>
+            <div class="weekly-promo__actions">
+              <a class="button button--green" href="#menu"><span>Order online</span><span aria-hidden="true">&rarr;</span></a>
+              <a class="text-link" href="tel:+15075322122">Call us <span aria-hidden="true">&nearr;</span></a>
             </div>
-          </article>
-
-          <article class="dish-card reveal reveal--delay-1" data-tilt>
-            <img class="select-none" src="https://images.unsplash.com/photo-1552332386-f8dd00dc2f85?auto=format&fit=crop&w=1200&q=88" alt="Fresh street tacos with lime and cilantro" loading="lazy" />
-            <div class="dish-card__content">
-              <span>02 · Handheld favorite</span>
-              <h3>Street Tacos</h3>
-              <p>Simple, fresh, and loaded with flavor.</p>
-            </div>
-          </article>
-
-          <article class="dish-card dish-card--ink reveal reveal--delay-2">
-            <div class="dish-card__number">03</div>
-            <div class="burrito-orbit" aria-hidden="true"><span>MONSTER · BURRITO · MONSTER · BURRITO · </span></div>
-            <div class="dish-card__content">
-              <span>03 · Bring an appetite</span>
-              <h3>Monster<br />Burrito</h3>
-              <p>A local legend. Go steak and make it count.</p>
-              <a href="tel:+15075322122">Order yours <span>→</span></a>
-            </div>
-          </article>
-        </div>
+          </div>
+        </article>
       </section>
 
       <section class="menu-section" id="menu" aria-labelledby="menu-title">
@@ -203,27 +210,78 @@
 
           <div class="menu-footer reveal">
             <div>
-              <p class="eyebrow">Ready when you are</p>
-              <strong>Call it in and we&rsquo;ll have it hot.</strong>
-              <p class="menu-footer__note">Prices and availability can change. Ask about daily specials when you call.</p>
+              <p class="eyebrow">Pickup made easy</p>
+              <strong>Build it. Pay online. Pick it up.</strong>
+              <p class="menu-footer__note">Your prices are verified against our current Square catalog again at checkout.</p>
             </div>
-            <a class="button button--cream group focus-visible:outline-4 focus-visible:outline-offset-4 focus-visible:outline-[#e49a21]" href="tel:+15075322122"><span>Call (507) 532-2122</span><span aria-hidden="true">→</span></a>
+            <button class="button button--cream" id="menu-cart-button" type="button"><span>Review your cart</span><span aria-hidden="true">→</span></button>
           </div>
         </div>
       </section>
 
-      <section class="salsa-story" id="story">
-        <div class="salsa-photo reveal">
-          <img class="select-none" src="https://images.unsplash.com/photo-1647403273976-06c20bed59bc?auto=format&fit=crop&w=1500&q=88" alt="Tortilla chips, fresh salsa, and a margarita on a colorful table" loading="lazy" />
-          <span class="image-label">Pass the chips</span>
+      <section class="story" id="story" aria-labelledby="story-title">
+        <div class="story-media reveal" data-parallax>
+          <img
+            class="story-owner-photo select-none"
+            src="images/pics/eloy-cid-owner.webp"
+            alt="Eloy Cid, owner of Mariachi Fiesta, welcoming guests from behind the restaurant bar"
+            loading="lazy"
+            decoding="async"
+          />
+          <div class="story-owner-card">
+            <span>Meet your host</span>
+            <strong>Eloy Cid</strong>
+            <small>Owner</small>
+          </div>
         </div>
-        <div class="salsa-copy reveal reveal--right">
-          <p class="eyebrow">The unofficial first course</p>
-          <h2 class="text-balance">It starts with<br />the <em>salsa.</em></h2>
-          <p class="lead">Smooth, bright, and just enough kick. The house salsa has a following all its own—some regulars take it home for the weekend.</p>
-          <blockquote>“Hot, fresh, and feels homemade.”</blockquote>
-          <p class="quote-source">— The way our guests describe it</p>
-          <div class="agave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+
+        <div class="story-copy reveal reveal--right">
+          <p class="eyebrow">Our story</p>
+          <h2 class="text-balance" id="story-title">A Marshall <span class="story-mobile-break">table</span><br /><em>built on welcome.</em></h2>
+          <p class="story-lead">For a quarter century, Mariachi Fiesta has welcomed Marshall with warm plates, house salsa, generous margaritas, and room at the table.</p>
+          <p>Owner Eloy Cid carries that tradition forward with a simple focus: familiar Mexican favorites, attentive service, and the kind of welcome that turns a first visit into a tradition.</p>
+          <p>Eloy is often the face guests meet at the bar or around the dining room. Come hungry, settle into a booth, and let him and the team take care of the rest.</p>
+
+          <div class="story-values" aria-label="What guides Mariachi Fiesta">
+            <div class="reveal reveal--delay-1"><strong>Local roots</strong><span>Proudly at home on Marshall&rsquo;s Main Street</span></div>
+            <div class="reveal reveal--delay-2"><strong>Generous plates</strong><span>Made to satisfy and made for sharing</span></div>
+            <div class="reveal reveal--delay-3"><strong>Personal welcome</strong><span>Eloy and the team are glad you&rsquo;re here</span></div>
+          </div>
+
+          <a class="text-link story-link" href="#visit">Come see us <span aria-hidden="true">&darr;</span></a>
+        </div>
+      </section>
+
+      <section class="inside section-shell" aria-labelledby="inside-title">
+        <div class="inside-heading reveal">
+          <div>
+            <p class="eyebrow">Come on in</p>
+            <h2 class="text-balance" id="inside-title">Your booth<br /><em>is waiting.</em></h2>
+          </div>
+          <p>Colorful, casual, and right at home on Main Street. Join us for a relaxed lunch, dinner with the family, or margaritas with friends.</p>
+        </div>
+
+        <div class="inside-gallery">
+          <figure class="inside-photo inside-photo--main reveal" data-parallax>
+            <img src="images/pics/mariachi-fiesta-dining-room.webp" alt="The colorful Mariachi Fiesta dining room with tables and wooden booths" loading="lazy" decoding="async" />
+            <figcaption>Downtown Marshall <span>329 W Main St</span></figcaption>
+          </figure>
+          <figure class="inside-photo inside-photo--booths reveal reveal--delay-1" data-parallax>
+            <img src="images/pics/mariachi-fiesta-booths.webp" alt="A row of comfortable booths and Mexican artwork inside Mariachi Fiesta" loading="lazy" decoding="async" />
+            <figcaption>Pull up a chair <span>We&rsquo;ll take it from here</span></figcaption>
+          </figure>
+          <figure class="inside-photo inside-photo--booth-row reveal reveal--delay-2" data-parallax>
+            <img src="images/pics/mariachi-fiesta-booth-row.webp" alt="Booth seating beneath colorful Mexican artwork inside Mariachi Fiesta" loading="lazy" decoding="async" />
+            <figcaption>Color on every wall <span>Booths for lunch or dinner</span></figcaption>
+          </figure>
+          <figure class="inside-photo inside-photo--full-room reveal" data-parallax>
+            <img src="images/pics/mariachi-fiesta-full-dining-room.webp" alt="A wide view across the Mariachi Fiesta dining room with booth and table seating" loading="lazy" decoding="async" />
+            <figcaption>Room for everyone <span>Tables, booths &amp; good company</span></figcaption>
+          </figure>
+          <figure class="inside-photo inside-photo--counter reveal reveal--delay-1" data-parallax>
+            <img src="images/pics/mariachi-fiesta-service-counter.webp" alt="The working service counter and back bar inside Mariachi Fiesta" loading="lazy" decoding="async" />
+            <figcaption>The heart of the house <span>Where every order begins</span></figcaption>
+          </figure>
         </div>
       </section>
 
@@ -235,7 +293,7 @@
             <p>Office lunch, game day, graduation, or just a hungry crowd—call us and we’ll help make it delicious.</p>
             <a class="button button--cream group focus-visible:outline-4 focus-visible:outline-offset-4 focus-visible:outline-[#e49a21]" href="tel:+15075322122"><span>Plan your feast</span><span aria-hidden="true">→</span></a>
           </div>
-          <div class="catering-image">
+          <div class="catering-image" data-parallax>
             <img class="select-none" src="https://images.unsplash.com/photo-1513456852971-30c0b8199d4d?auto=format&fit=crop&w=1400&q=88" alt="A vibrant tray of loaded nachos for sharing" loading="lazy" />
           </div>
           <div class="catering-burst" aria-hidden="true">¡VÁMONOS!</div>
@@ -300,6 +358,7 @@
       <b id="cart-count" aria-label="0 items">0</b>
       <strong id="cart-toggle-total">$0.00</strong>
     </button>
+    <p class="visually-hidden" id="cart-announcer" aria-live="polite"></p>
 
     <button class="cart-backdrop" id="cart-backdrop" type="button" aria-label="Close cart" tabindex="-1"></button>
     <aside class="cart-drawer" id="cart-drawer" aria-labelledby="cart-title" aria-hidden="true" inert>
@@ -358,6 +417,10 @@
               <input id="billing-postal-code" name="postalCode" type="text" inputmode="numeric" autocomplete="postal-code" pattern="[0-9]{5}(-[0-9]{4})?" placeholder="56258" title="Enter a five-digit ZIP code or ZIP+4" required />
             </label>
           </div>
+          <label class="policy-consent">
+            <input id="policy-consent" name="policyConsent" type="checkbox" required />
+            <span>I agree to the <a href="order-policy.html" target="_blank">Order Policy</a> and acknowledge the <a href="privacy.html" target="_blank">Privacy Policy</a>.</span>
+          </label>
           <button class="button button--green checkout-continue" type="submit">
             <span>Continue to payment</span><span aria-hidden="true">&rarr;</span>
           </button>
@@ -381,12 +444,66 @@
     </dialog>
 
     <footer class="site-footer">
-      <img class="footer-logo" src="images/menu/m-logo.png" alt="Mariachi Fiesta" loading="lazy" />
-      <p>Big flavor on Main Street.</p>
-      <div class="footer-links">
-        <a href="#specials">Specials</a><a href="#menu">Menu</a><a href="#story">Story</a><a href="#catering">Catering</a><a href="#visit">Visit</a>
+      <div class="footer-shell">
+        <div class="footer-showcase">
+          <div class="footer-stat footer-stat--years" aria-label="Celebrating 25 years in Marshall">
+            <p>Est. 2001</p>
+            <strong>25</strong>
+            <span>Years of fiesta</span>
+          </div>
+
+          <div class="footer-cta">
+            <div>
+              <p class="eyebrow">Pickup without the wait</p>
+              <p class="footer-cta__title">Your next fiesta is <em>only a few clicks away.</em></p>
+            </div>
+            <a class="button button--cream" href="#menu"><span>Start an order</span><span aria-hidden="true">&rarr;</span></a>
+          </div>
+
+          <div class="footer-stat footer-stat--hours" aria-label="Open Monday through Saturday from 11 AM to 9 PM">
+            <p>Open six days</p>
+            <strong><time datetime="11:00">11<small>am</small></time><i aria-hidden="true">&ndash;</i><time datetime="21:00">9<small>pm</small></time></strong>
+            <span>Monday&ndash;Saturday</span>
+          </div>
+        </div>
+
+        <div class="footer-main">
+          <div class="footer-brand">
+            <img class="footer-logo" src="images/menu/m-logo.webp" alt="Mariachi Fiesta" loading="lazy" decoding="async" />
+            <div class="footer-brand__copy">
+              <p>Big flavor on Main Street.</p>
+              <span>Serving Marshall since 2001</span>
+            </div>
+          </div>
+
+          <nav class="footer-nav" aria-label="Footer navigation">
+            <p class="footer-heading">Explore</p>
+            <div class="footer-links">
+              <a href="#menu">Order online</a>
+              <a href="#story">Our story</a>
+              <a href="#catering">Catering</a>
+              <a href="#visit">Visit</a>
+            </div>
+          </nav>
+
+          <div class="footer-visit">
+            <p class="footer-heading">Come find us</p>
+            <a href="https://www.google.com/maps/dir/?api=1&amp;destination=Mariachi+Fiesta%2C+329+W+Main+St%2C+Marshall%2C+MN+56258&amp;destination_place_id=ChIJqx9J_wxZiocRCXNuQPg2Ikk" target="_blank" rel="noreferrer">329 W Main St<br />Marshall, MN 56258</a>
+            <a class="footer-phone" href="tel:+15075322122">(507) 532-2122</a>
+          </div>
+        </div>
+
+        <div class="footer-legal">
+          <div class="footer-meta">
+            <span>&copy; 2026 Mariachi Fiesta</span>
+            <span aria-hidden="true">&bull;</span>
+            <a href="privacy.html">Privacy</a>
+            <span aria-hidden="true">&bull;</span>
+            <a href="order-policy.html">Order policy</a>
+          </div>
+          <span class="footer-credit">Website crafted by <a href="https://midvora.com" target="_blank" rel="noreferrer">Midvora <span aria-hidden="true">&nearr;</span></a></span>
+        </div>
       </div>
-      <p class="footer-note">Website concept · All restaurant details should be confirmed before launch.</p>
     </footer>
   </body>
 </html>

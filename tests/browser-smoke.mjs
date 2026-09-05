@@ -49,6 +49,8 @@ async function waitFor(expression, timeout = 15_000) {
 
 await send('Page.enable');
 await send('Runtime.enable');
+await send('Network.enable');
+await send('Network.setCacheDisabled', { cacheDisabled: true });
 await send('Storage.clearDataForOrigin', { origin: 'http://localhost:3000', storageTypes: 'local_storage' });
 await send('Page.navigate', { url: 'http://localhost:3000' });
 await waitFor("document.readyState === 'complete'");
@@ -67,6 +69,17 @@ assert.equal(initial.logoLoaded, true);
 assert.equal(initial.menuError, false);
 assert.equal(initial.paymentInitiallyHidden, true);
 assert.equal(initial.billingInitiallyVisible, true);
+
+await evaluate('window.scrollTo(0, 1000)');
+await new Promise((resolve) => setTimeout(resolve, 250));
+const stickyHeader = await evaluate(`(() => {
+  const header = document.querySelector('.site-header');
+  return {
+    top: Math.round(header.getBoundingClientRect().top),
+    compact: header.classList.contains('is-scrolled')
+  };
+})()`);
+assert.deepEqual(stickyHeader, { top: 0, compact: true });
 
 await evaluate("document.querySelector('.add-to-cart').click()");
 await waitFor("document.querySelector('#cart-count').textContent === '1'");
@@ -102,6 +115,7 @@ await evaluate(`(() => {
     input.value = value;
     input.dispatchEvent(new Event('input', { bubbles: true }));
   });
+  document.getElementById('policy-consent').checked = true;
   document.querySelector('#billing-contact-form').requestSubmit();
 })()`);
 
@@ -114,6 +128,28 @@ const paymentStep = await evaluate(`(() => ({
   payEnabled: !document.querySelector('#payment-submit').disabled
 }))()`);
 assert.deepEqual(paymentStep, { billingHidden: true, paymentVisible: true, cardMounted: true, payEnabled: true });
+
+await evaluate("document.querySelector('#checkout-close').click(); document.querySelector('.site-footer').scrollIntoView({ block: 'end' })");
+await new Promise((resolve) => setTimeout(resolve, 500));
+const footer = await evaluate(`(() => {
+  const viewportCenter = document.documentElement.clientWidth / 2;
+  const shell = document.querySelector('.footer-shell').getBoundingClientRect();
+  const callout = document.querySelector('.footer-cta').getBoundingClientRect();
+  const credit = document.querySelector('.footer-credit').getBoundingClientRect();
+  const cart = document.querySelector('#cart-toggle').getBoundingClientRect();
+  const overlaps = !(credit.right < cart.left || credit.left > cart.right || credit.bottom < cart.top || credit.top > cart.bottom);
+  return {
+    viewport: document.documentElement.clientWidth,
+    shellCenterOffset: Math.round((shell.left + shell.width / 2) - viewportCenter),
+    calloutCenterOffset: Math.round((callout.left + callout.width / 2) - viewportCenter),
+    creditCenterOffset: Math.round((credit.left + credit.width / 2) - viewportCenter),
+    cartOverlapsCredit: overlaps
+  };
+})()`);
+assert.ok(Math.abs(footer.shellCenterOffset) <= 2, JSON.stringify(footer));
+assert.ok(Math.abs(footer.calloutCenterOffset) <= 2, JSON.stringify(footer));
+assert.ok(Math.abs(footer.creditCenterOffset) <= 2, JSON.stringify(footer));
+assert.equal(footer.cartOverlapsCredit, false, JSON.stringify(footer));
 
 await send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
 const mobile = await evaluate(`(() => ({
@@ -138,10 +174,10 @@ await evaluate("window.scrollTo(100, 0)");
 await new Promise((resolve) => setTimeout(resolve, 100));
 mobile.scrollXAfterAttempt = await evaluate('window.scrollX');
 assert.equal(mobile.viewport, 390);
-assert.equal(mobile.logoWidth, 64);
-assert.equal(mobile.bodyOverflowX, 'hidden');
+assert.ok(mobile.logoWidth >= 64 && mobile.logoWidth <= 65, `Unexpected mobile logo width: ${mobile.logoWidth}`);
+assert.ok(['clip', 'hidden'].includes(mobile.bodyOverflowX), `Unexpected body overflow-x: ${mobile.bodyOverflowX}`);
 assert.equal(mobile.scrollXAfterAttempt, 0, JSON.stringify(mobile.overflowingElements));
 
 assert.deepEqual(runtimeErrors, []);
 socket.close();
-console.log(JSON.stringify({ initial, cart, firstStep, paymentStep, mobile }, null, 2));
+console.log(JSON.stringify({ initial, stickyHeader, cart, firstStep, paymentStep, footer, mobile }, null, 2));

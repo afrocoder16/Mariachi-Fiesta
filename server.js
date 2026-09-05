@@ -21,6 +21,8 @@ const port = Number(process.env.PORT) || 3000;
 
 const publicFiles = new Set([
   'index.html',
+  'privacy.html',
+  'order-policy.html',
   'styles.css',
   'script.js',
   'shopping-cart.js',
@@ -61,9 +63,9 @@ async function readJson(request) {
   }
 }
 
-function serveStatic(requestPath, response) {
+function serveStatic(requestPath, response, method = 'GET') {
   const relativePath = requestPath === '/' ? 'index.html' : decodeURIComponent(requestPath.slice(1));
-  const allowed = publicFiles.has(relativePath) || relativePath.startsWith('images/menu/');
+  const allowed = publicFiles.has(relativePath) || relativePath.startsWith('images/');
   if (!allowed || relativePath.includes('..')) {
     response.writeHead(404);
     response.end('Not found');
@@ -79,9 +81,13 @@ function serveStatic(requestPath, response) {
     }
     response.writeHead(200, {
       'Content-Type': contentTypes[path.extname(filePath).toLowerCase()] || 'application/octet-stream',
+      'Cache-Control': relativePath.endsWith('.html') ? 'no-cache' : 'public, max-age=3600',
       'X-Content-Type-Options': 'nosniff',
+      'Referrer-Policy': 'strict-origin-when-cross-origin',
+      'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
+      'X-Frame-Options': 'DENY',
     });
-    response.end(contents);
+    response.end(method === 'HEAD' ? undefined : contents);
   });
 }
 
@@ -112,7 +118,7 @@ const server = http.createServer(async (request, response) => {
       response.writeHead(405, { Allow: 'GET, HEAD' });
       return response.end('Method not allowed');
     }
-    return serveStatic(url.pathname, response);
+    return serveStatic(url.pathname, response, request.method);
   } catch (error) {
     const status = error instanceof SquareApiError ? error.status : 500;
     console.error(`[Server] ${request.method} ${url.pathname}:`, error.message);

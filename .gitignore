@@ -1,4 +1,18 @@
+# Local secrets
 .env
 id.md
+
+# Dependencies and generated output
 node_modules/
-npm-debug.log*
+archive/
+coverage/
+*.log
+
+# Local browser and operating-system artifacts
+.chrome-*/
+ui-check*
+ui-final-*
+gallery-*.png
+polish-*.png
+.DS_Store
+Thumbs.db

@@ -5,6 +5,7 @@ function closeMenu() {
   menuToggle?.setAttribute('aria-expanded', 'false');
   menuToggle?.setAttribute('aria-label', 'Open menu');
   mobileMenu?.setAttribute('aria-hidden', 'true');
+  if (mobileMenu) mobileMenu.inert = true;
   mobileMenu?.classList.remove('is-open');
 }
 
@@ -13,6 +14,7 @@ menuToggle?.addEventListener('click', () => {
   menuToggle.setAttribute('aria-expanded', String(!open));
   menuToggle.setAttribute('aria-label', open ? 'Open menu' : 'Close menu');
   mobileMenu.setAttribute('aria-hidden', String(open));
+  mobileMenu.inert = open;
   mobileMenu.classList.toggle('is-open', !open);
 });
 
@@ -35,8 +37,69 @@ const revealObserver = new IntersectionObserver(
 
 document.querySelectorAll('.reveal').forEach((element) => revealObserver.observe(element));
 
+const sectionPresenceObserver = new IntersectionObserver(
+  (entries) => entries.forEach((entry) => entry.target.classList.toggle('is-in-view', entry.isIntersecting)),
+  { threshold: 0.16 }
+);
+
+document.querySelectorAll('main > section').forEach((section) => sectionPresenceObserver.observe(section));
+
 const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 const finePointer = window.matchMedia('(pointer: fine)').matches;
+const scrollProgressBar = document.getElementById('scroll-progress-bar');
+const siteHeader = document.querySelector('.site-header');
+const parallaxFrames = Array.from(document.querySelectorAll('[data-parallax]'));
+const navigationLinks = Array.from(document.querySelectorAll('.desktop-nav a[href^="#"], .mobile-menu a[href^="#"]'));
+const navigationSections = Array.from(
+  new Set(navigationLinks.map((link) => document.querySelector(link.getAttribute('href'))).filter(Boolean))
+);
+let activeNavigationId = '';
+let scrollFrame;
+
+function updateActiveNavigation() {
+  let nextId = '';
+  const activationLine = window.innerHeight * 0.42;
+
+  navigationSections.forEach((section) => {
+    const bounds = section.getBoundingClientRect();
+    if (bounds.top <= activationLine && bounds.bottom > 0) nextId = section.id;
+  });
+
+  if (nextId === activeNavigationId) return;
+  activeNavigationId = nextId;
+  navigationLinks.forEach((link) => {
+    const isActive = link.getAttribute('href') === `#${nextId}`;
+    link.classList.toggle('is-active', isActive);
+    if (isActive) link.setAttribute('aria-current', 'location');
+    else link.removeAttribute('aria-current');
+  });
+}
+
+function updateScrollEffects() {
+  scrollFrame = null;
+  const scrollable = Math.max(1, document.documentElement.scrollHeight - window.innerHeight);
+  const progress = Math.min(1, Math.max(0, window.scrollY / scrollable));
+  scrollProgressBar?.style.setProperty('--scroll-progress', progress);
+  siteHeader?.classList.toggle('is-scrolled', window.scrollY > 24);
+  updateActiveNavigation();
+
+  if (!reduceMotion) {
+    parallaxFrames.forEach((frame) => {
+      const bounds = frame.getBoundingClientRect();
+      if (bounds.bottom < 0 || bounds.top > window.innerHeight) return;
+      const position = (bounds.top + bounds.height / 2 - window.innerHeight / 2) / window.innerHeight;
+      frame.style.setProperty('--parallax-y', `${Math.max(-18, Math.min(18, position * -18)).toFixed(1)}px`);
+    });
+  }
+}
+
+function requestScrollUpdate() {
+  if (!scrollFrame) scrollFrame = window.requestAnimationFrame(updateScrollEffects);
+}
+
+window.addEventListener('scroll', requestScrollUpdate, { passive: true });
+window.addEventListener('resize', requestScrollUpdate);
+updateScrollEffects();
 
 if (!reduceMotion && finePointer) {
   document.querySelectorAll('[data-tilt]').forEach((card) => {
@@ -341,6 +404,8 @@ if (menuBody && menuFilters && Array.isArray(menuData)) {
   const cartToggleTotal = document.getElementById('cart-toggle-total');
   const cartTotal = document.getElementById('cart-total');
   const checkoutButton = document.getElementById('checkout-button');
+  const menuCartButton = document.getElementById('menu-cart-button');
+  const cartAnnouncer = document.getElementById('cart-announcer');
   const checkoutDialog = document.getElementById('checkout-dialog');
   const checkoutClose = document.getElementById('checkout-close');
   const checkoutCount = document.getElementById('checkout-count');
@@ -355,6 +420,7 @@ if (menuBody && menuFilters && Array.isArray(menuData)) {
   const paymentSubmit = document.getElementById('payment-submit');
   const paymentSubmitLabel = document.getElementById('payment-submit-label');
   const paymentStatus = document.getElementById('payment-status');
+  const sandboxNote = document.querySelector('.sandbox-note');
 
   const liveItems = new Map();
   let liveGroups = [];
@@ -377,8 +443,26 @@ if (menuBody && menuFilters && Array.isArray(menuData)) {
     return payload;
   }
 
-  const squareConfigPromise = fetchJson('/api/config').then((config) => {
+  function loadSquareSdk(environment) {
+    if (window.Square) return Promise.resolve();
+    const source = environment === 'production'
+      ? 'https://web.squarecdn.com/v1/square.js'
+      : 'https://sandbox.web.squarecdn.com/v1/square.js';
+
+    return new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = source;
+      script.dataset.squareSdk = environment;
+      script.onload = resolve;
+      script.onerror = () => reject(new Error('Square Web Payments SDK did not load.'));
+      document.head.append(script);
+    });
+  }
+
+  const squareConfigPromise = fetchJson('/api/config').then(async (config) => {
     console.log(`[Square] Public config loaded: ${config.environment}, location ${config.locationId}`);
+    if (sandboxNote) sandboxNote.hidden = config.environment !== 'sandbox';
+    await loadSquareSdk(config.environment);
     return config;
   });
 
@@ -534,6 +618,11 @@ if (menuBody && menuFilters && Array.isArray(menuData)) {
       quantity: 1,
     });
     button.textContent = 'Added!';
+    if (cartAnnouncer) cartAnnouncer.textContent = `${item.name} added to your cart.`;
+    cartToggle.classList.remove('has-update');
+    void cartToggle.offsetWidth;
+    cartToggle.classList.add('has-update');
+    setTimeout(() => cartToggle.classList.remove('has-update'), 650);
     setTimeout(() => (button.textContent = 'Add to cart'), 900);
   });
 
@@ -595,6 +684,7 @@ if (menuBody && menuFilters && Array.isArray(menuData)) {
   });
 
   cartToggle.addEventListener('click', openCart);
+  menuCartButton?.addEventListener('click', openCart);
   cartClose.addEventListener('click', closeCart);
   cartBackdrop.addEventListener('click', closeCart);
   document.addEventListener('keydown', (event) => {

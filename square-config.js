@@ -135,7 +135,7 @@ function normalizeCatalog(objects) {
       const groupId = slugify(categoryName);
       if (!groups.has(groupId)) groups.set(groupId, { id: groupId, title: categoryName, items: [] });
 
-      const localImagePath = `images/menu/${slugify(data.name)}.jpg`;
+      const localImagePath = `images/menu/${slugify(data.name)}.webp`;
       const catalogImageUrl = (data.image_ids || []).map((id) => images.get(id)).find(Boolean) || '';
       const imageUrl = catalogImageUrl || (fs.existsSync(path.join(__dirname, localImagePath)) ? localImagePath : '');
 

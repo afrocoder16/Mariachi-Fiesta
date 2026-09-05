@@ -2,7 +2,7 @@
   "name": "mariachi-fiesta-square-checkout",
   "version": "1.0.0",
   "private": true,
-  "description": "Mariachi Fiesta website with a secure Square sandbox integration",
+  "description": "Mariachi Fiesta website with secure Square online ordering",
   "scripts": {
     "start": "node server.js",
     "check": "node --check server.js && node --check square-config.js && node --check shopping-cart.js && node --check script.js",
