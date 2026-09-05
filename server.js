@@ -1,5 +1,6 @@
 const fs = require('node:fs');
 const http = require('node:http');
+const net = require('node:net');
 const path = require('node:path');
 
 const ROOT = __dirname;
@@ -16,8 +17,12 @@ function loadEnv(filePath) {
 
 loadEnv(path.join(ROOT, '.env'));
 
-const { SquareApiError, createPaymentRequest, fetchMenuItems, getPublicConfig, verifySquareConnection } = require('./square-config');
+const { SquareApiError, createCheckoutRequest, createPaymentRequest, fetchMenuItems, getPublicConfig } = require('./square-config');
 const port = Number(process.env.PORT) || 3000;
+const RATE_LIMIT_WINDOW_MS = 60_000;
+const RATE_LIMIT_MAX = 10;
+const rateLimitedPaths = new Set(['/api/menu', '/api/checkout', '/api/payments']);
+const rateLimitBuckets = new Map();
 
 const publicFiles = new Set([
   'index.html',
@@ -39,14 +44,56 @@ const contentTypes = {
   '.svg': 'image/svg+xml',
 };
 
-function sendJson(response, status, payload) {
+function sendJson(response, status, payload, extraHeaders = {}) {
   response.writeHead(status, {
     'Content-Type': 'application/json; charset=utf-8',
     'Cache-Control': 'no-store',
     'X-Content-Type-Options': 'nosniff',
+    ...extraHeaders,
   });
   response.end(JSON.stringify(payload));
 }
+
+function getClientIp(request) {
+  const candidates = [
+    request.headers['cf-connecting-ip'],
+    request.headers['x-real-ip'],
+    String(request.headers['x-forwarded-for'] || '').split(',')[0],
+    request.socket.remoteAddress,
+  ];
+  return candidates.map((value) => String(value || '').trim()).find((value) => net.isIP(value)) || 'unknown';
+}
+
+function checkRateLimit(request, pathname) {
+  const now = Date.now();
+  const key = `${getClientIp(request)}:${pathname}`;
+  let bucket = rateLimitBuckets.get(key);
+  if (!bucket || now >= bucket.resetAt) {
+    bucket = { count: 0, resetAt: now + RATE_LIMIT_WINDOW_MS };
+    rateLimitBuckets.set(key, bucket);
+  }
+  bucket.count += 1;
+
+  const remaining = Math.max(0, RATE_LIMIT_MAX - bucket.count);
+  const resetSeconds = Math.max(1, Math.ceil((bucket.resetAt - now) / 1000));
+  return {
+    allowed: bucket.count <= RATE_LIMIT_MAX,
+    headers: {
+      'RateLimit-Limit': String(RATE_LIMIT_MAX),
+      'RateLimit-Remaining': String(remaining),
+      'RateLimit-Reset': String(resetSeconds),
+      ...(bucket.count > RATE_LIMIT_MAX ? { 'Retry-After': String(resetSeconds) } : {}),
+    },
+  };
+}
+
+const rateLimitCleanup = setInterval(() => {
+  const now = Date.now();
+  rateLimitBuckets.forEach((bucket, key) => {
+    if (now >= bucket.resetAt) rateLimitBuckets.delete(key);
+  });
+}, RATE_LIMIT_WINDOW_MS);
+rateLimitCleanup.unref();
 
 async function readJson(request) {
   const chunks = [];
@@ -95,21 +142,31 @@ const server = http.createServer(async (request, response) => {
   const url = new URL(request.url, `http://${request.headers.host || 'localhost'}`);
 
   try {
+    let rateLimitHeaders = {};
+    if (rateLimitedPaths.has(url.pathname)) {
+      const rateLimit = checkRateLimit(request, url.pathname);
+      rateLimitHeaders = rateLimit.headers;
+      if (!rateLimit.allowed) {
+        return sendJson(response, 429, { error: 'Too many requests. Please wait a minute and try again.' }, rateLimitHeaders);
+      }
+    }
+
     if (request.method === 'GET' && url.pathname === '/api/health') {
       return sendJson(response, 200, { ok: true, squareEnvironment: getPublicConfig().environment });
     }
     if (request.method === 'GET' && url.pathname === '/api/config') {
       return sendJson(response, 200, getPublicConfig());
     }
-    if (request.method === 'GET' && url.pathname === '/api/square-status') {
-      return sendJson(response, 200, await verifySquareConnection());
-    }
     if (request.method === 'GET' && url.pathname === '/api/menu') {
-      return sendJson(response, 200, { categories: await fetchMenuItems() });
+      return sendJson(response, 200, { categories: await fetchMenuItems() }, rateLimitHeaders);
+    }
+    if (request.method === 'POST' && url.pathname === '/api/checkout') {
+      const checkout = await createCheckoutRequest(await readJson(request));
+      return sendJson(response, 200, { checkout }, rateLimitHeaders);
     }
     if (request.method === 'POST' && url.pathname === '/api/payments') {
       const result = await createPaymentRequest(await readJson(request));
-      return sendJson(response, 200, { payment: result });
+      return sendJson(response, 200, { payment: result }, rateLimitHeaders);
     }
     if (url.pathname.startsWith('/api/')) {
       return sendJson(response, 404, { error: 'API route not found.' });
@@ -124,11 +181,17 @@ const server = http.createServer(async (request, response) => {
     console.error(`[Server] ${request.method} ${url.pathname}:`, error.message);
     return sendJson(response, status >= 400 && status < 600 ? status : 500, {
       error: status === 500 ? 'Square is temporarily unavailable. Please try again.' : error.message,
+      ...(error.code ? { code: error.code } : {}),
+      ...(error.data && typeof error.data === 'object' ? error.data : {}),
       ...(process.env.NODE_ENV === 'development' && error.details?.length ? { details: error.details } : {}),
     });
   }
 });
 
-server.listen(port, () => {
-  console.log(`[Server] Mariachi Fiesta is running at http://localhost:${port}`);
-});
+if (require.main === module) {
+  server.listen(port, () => {
+    console.log(`[Server] Mariachi Fiesta is running at http://localhost:${port}`);
+  });
+}
+
+module.exports = { server };

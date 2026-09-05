@@ -28,11 +28,13 @@ if (missing.length) {
 }
 
 class SquareApiError extends Error {
-  constructor(message, status = 500, details = []) {
+  constructor(message, status = 500, details = [], code = '', data = null) {
     super(message);
     this.name = 'SquareApiError';
     this.status = status;
     this.details = details;
+    this.code = code;
+    this.data = data;
   }
 }
 
@@ -167,23 +169,6 @@ async function fetchMenuItems() {
   return groups;
 }
 
-async function verifySquareConnection() {
-  const payload = await squareRequest('/locations');
-  const locations = (payload.locations || []).map((location) => ({
-    id: location.id,
-    name: location.name || '',
-    status: location.status || '',
-  }));
-  const configuredLocation = locations.find((location) => location.id === locationId);
-  console.log(`[Square] Connection verified: ${locations.length} location(s), configured location found: ${Boolean(configuredLocation)}`);
-  return {
-    connected: true,
-    locationFound: Boolean(configuredLocation),
-    locationName: configuredLocation?.name || '',
-    locationStatus: configuredLocation?.status || '',
-  };
-}
-
 function validateCart(cart, menu) {
   if (!Array.isArray(cart) || cart.length === 0 || cart.length > 50) {
     throw new SquareApiError('The cart must contain between 1 and 50 items.', 400);
@@ -214,42 +199,197 @@ function validateCart(cart, menu) {
     if (!Number.isSafeInteger(amount) || amount > 1_000_000) {
       throw new SquareApiError('The cart total is outside the supported range.', 400);
     }
-    return `${quantity}x ${variation.itemName}${variation.name === 'Regular' ? '' : ` (${variation.name})`}`;
+    return {
+      variationId: variation.id,
+      name: variation.itemName,
+      variationName: variation.name,
+      quantity,
+      price: variation.price,
+      currency: variation.currency,
+    };
   });
 
   return { amount, currency: currency || 'USD', lines };
 }
 
-/** Revalidates catalog pricing and creates a Square Payments API request. */
-async function createPaymentRequest(request = {}) {
-  const { sourceId, idempotencyKey, cart } = request || {};
-  if (!sourceId || !idempotencyKey || !/^[a-zA-Z0-9_-]{1,192}$/.test(idempotencyKey)) {
-    throw new SquareApiError('A payment token and valid idempotency key are required.', 400);
+function validateIdempotencyKey(value) {
+  if (typeof value !== 'string' || !/^[a-zA-Z0-9_-]{8,128}$/.test(value)) {
+    throw new SquareApiError('A valid checkout idempotency key is required.', 400);
+  }
+  return value;
+}
+
+function validateBillingContact(contact = {}) {
+  const givenName = String(contact.givenName || '').trim().replace(/\s+/g, ' ');
+  const familyName = String(contact.familyName || '').trim().replace(/\s+/g, ' ');
+  const email = String(contact.email || '').trim().toLowerCase();
+  const address = String(contact.addressLines?.[0] || '').trim().replace(/\s+/g, ' ');
+  const city = String(contact.city || '').trim().replace(/\s+/g, ' ');
+  const state = String(contact.state || '').trim().toUpperCase();
+  const postalCode = String(contact.postalCode || '').trim();
+  const displayName = `${givenName} ${familyName}`.trim();
+
+  if (!displayName || displayName.length > 100) {
+    throw new SquareApiError('Enter a valid customer name.', 400);
+  }
+  if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    throw new SquareApiError('Enter a valid customer email address.', 400);
+  }
+  if (!address || address.length > 200 || !city || city.length > 100) {
+    throw new SquareApiError('Enter a valid billing address and city.', 400);
+  }
+  if (!/^[A-Z]{2}$/.test(state) || !/^\d{5}(?:-\d{4})?$/.test(postalCode)) {
+    throw new SquareApiError('Enter a valid state and postal code.', 400);
   }
 
-  // Deliberately fetch fresh prices at checkout; never trust browser totals.
+  return {
+    givenName,
+    familyName,
+    displayName,
+    email,
+    addressLines: [address],
+    city,
+    state,
+    countryCode: 'US',
+    postalCode,
+  };
+}
+
+function validateExpectedTotal(expectedAmount, expectedCurrency) {
+  const amount = Number(expectedAmount);
+  const currency = String(expectedCurrency || '').toUpperCase();
+  if (!Number.isSafeInteger(amount) || amount < 0 || amount > 1_500_000 || !/^[A-Z]{3}$/.test(currency)) {
+    throw new SquareApiError('A valid displayed checkout total is required.', 400);
+  }
+  return { amount, currency };
+}
+
+function checkoutSummary(order, lines) {
+  const amount = Number(order.total_money?.amount);
+  const currency = order.total_money?.currency || lines[0]?.currency || 'USD';
+  if (!Number.isSafeInteger(amount) || amount < 0) {
+    throw new SquareApiError('Square did not return a valid order total.', 502);
+  }
+
+  return {
+    orderId: order.id,
+    orderVersion: order.version,
+    amount,
+    currency,
+    subtotal: Number(order.total_money?.amount ?? amount) + Number(order.total_discount_money?.amount || 0) - Number(order.total_tax_money?.amount || 0),
+    tax: Number(order.total_tax_money?.amount || 0),
+    discount: Number(order.total_discount_money?.amount || 0),
+    items: lines,
+  };
+}
+
+async function createSquareOrder(request = {}) {
+  const { orderIdempotencyKey, idempotencyKey, cart, billingContact, expectedAmount, expectedCurrency } = request || {};
+  const checkoutKey = validateIdempotencyKey(orderIdempotencyKey || idempotencyKey);
+  const contact = validateBillingContact(billingContact);
+  const expected = validateExpectedTotal(expectedAmount, expectedCurrency);
+
+  // Confirm availability, then let Square calculate the authoritative order total.
   const menu = await fetchMenuItems();
-  const { amount, currency, lines } = validateCart(cart, menu);
-  const payload = await squareRequest('/payments', {
+  const { lines } = validateCart(cart, menu);
+  const orderPayload = await squareRequest('/orders', {
     method: 'POST',
     body: JSON.stringify({
-      source_id: sourceId,
-      idempotency_key: idempotencyKey,
-      amount_money: { amount, currency },
-      location_id: locationId,
-      autocomplete: true,
-      note: `Website order: ${lines.join(', ')}`.slice(0, 500),
+      idempotency_key: `${checkoutKey}-order`,
+      order: {
+        location_id: locationId,
+        reference_id: checkoutKey.slice(0, 40),
+        source: { name: 'Mariachi Fiesta Website' },
+        line_items: lines.map((line) => ({
+          catalog_object_id: line.variationId,
+          quantity: String(line.quantity),
+        })),
+        pricing_options: {
+          auto_apply_discounts: true,
+          auto_apply_taxes: true,
+        },
+        fulfillments: [
+          {
+            type: 'PICKUP',
+            state: 'PROPOSED',
+            pickup_details: {
+              schedule_type: 'ASAP',
+              recipient: {
+                display_name: contact.displayName,
+                email_address: contact.email,
+              },
+              note: 'Pickup order placed on the Mariachi Fiesta website.',
+            },
+          },
+        ],
+      },
     }),
   });
+
+  const order = orderPayload.order;
+  if (!order?.id || order.location_id !== locationId) {
+    throw new SquareApiError('Square did not return a valid order.', 502);
+  }
+
+  const checkout = checkoutSummary(order, lines);
+  if (checkout.amount !== expected.amount || checkout.currency !== expected.currency) {
+    throw new SquareApiError(
+      'The order total changed. Review and confirm the updated total before paying.',
+      409,
+      [],
+      'PRICE_CHANGED',
+      { checkout }
+    );
+  }
+
+  return { checkoutKey, contact, order, checkout };
+}
+
+/** Creates or retrieves an idempotent Square order for customer confirmation. */
+async function createCheckoutRequest(request = {}) {
+  const { checkout } = await createSquareOrder(request);
+  return checkout;
+}
+
+/** Revalidates the checkout, creates the Square order, and links its payment. */
+async function createPaymentRequest(request = {}) {
+  const { sourceId, paymentIdempotencyKey } = request || {};
+  if (typeof sourceId !== 'string' || !sourceId || sourceId.length > 500) {
+    throw new SquareApiError('A valid payment token is required.', 400);
+  }
+  const paymentKey = validateIdempotencyKey(paymentIdempotencyKey);
+
+  const { contact, order, checkout } = await createSquareOrder(request);
+  let payload;
+  try {
+    payload = await squareRequest('/payments', {
+      method: 'POST',
+      body: JSON.stringify({
+        source_id: sourceId,
+        idempotency_key: `${paymentKey}-payment`,
+        amount_money: { amount: checkout.amount, currency: checkout.currency },
+        location_id: locationId,
+        order_id: order.id,
+        buyer_email_address: contact.email,
+        autocomplete: true,
+        note: `Website pickup for ${contact.displayName}`.slice(0, 500),
+      }),
+    });
+  } catch (error) {
+    if (error instanceof SquareApiError && error.status >= 400 && error.status < 500) {
+      error.code = error.code || 'PAYMENT_RETRY_ALLOWED';
+    }
+    throw error;
+  }
 
   const payment = payload.payment || {};
   return {
     id: payment.id,
     status: payment.status,
-    orderId: payment.order_id,
+    orderId: payment.order_id || order.id,
     receiptUrl: payment.receipt_url,
-    amount: Number(payment.amount_money?.amount ?? amount),
-    currency: payment.amount_money?.currency || currency,
+    amount: Number(payment.amount_money?.amount ?? checkout.amount),
+    currency: payment.amount_money?.currency || checkout.currency,
   };
 }
 
@@ -261,8 +401,10 @@ console.log(`[Square] Configured for ${environment} at location ${locationId}`);
 
 module.exports = {
   SquareApiError,
+  createCheckoutRequest,
   createPaymentRequest,
   fetchMenuItems,
   getPublicConfig,
-  verifySquareConnection,
+  validateBillingContact,
+  validateCart,
 };

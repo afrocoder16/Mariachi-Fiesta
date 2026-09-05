@@ -41,7 +41,7 @@ npm test
 
 ## Deployment
 
-This is a Node application, not a static GitHub Pages site. The host must run `server.js` so `/api/config`, `/api/catalog`, and `/api/payments` are available.
+This is a Node application, not a static GitHub Pages site. The host must run `server.js` so `/api/config`, `/api/menu`, `/api/checkout`, and `/api/payments` are available.
 
 For a live launch:
 

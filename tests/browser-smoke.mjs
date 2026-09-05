@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 
 const endpoint = process.argv[2];
-if (!endpoint) throw new Error('Usage: node tests/browser-smoke.mjs <CDP websocket URL>');
+if (!endpoint) throw new Error('Usage: node tests/browser-smoke.mjs <CDP websocket URL> [site URL]');
+const siteUrl = process.argv[3] || 'http://localhost:3000';
 
 const socket = new WebSocket(endpoint);
 const pending = new Map();
@@ -51,8 +52,8 @@ await send('Page.enable');
 await send('Runtime.enable');
 await send('Network.enable');
 await send('Network.setCacheDisabled', { cacheDisabled: true });
-await send('Storage.clearDataForOrigin', { origin: 'http://localhost:3000', storageTypes: 'local_storage' });
-await send('Page.navigate', { url: 'http://localhost:3000' });
+await send('Storage.clearDataForOrigin', { origin: siteUrl, storageTypes: 'local_storage,session_storage' });
+await send('Page.navigate', { url: siteUrl });
 await waitFor("document.readyState === 'complete'");
 await waitFor("document.querySelectorAll('.menu-item').length > 0");
 
@@ -119,15 +120,24 @@ await evaluate(`(() => {
   document.querySelector('#billing-contact-form').requestSubmit();
 })()`);
 
-await waitFor("!document.querySelector('#payment-step').hidden");
+await waitFor("!document.querySelector('#payment-step').hidden || document.querySelector('#checkout-continue-label').textContent === 'Confirm updated total'", 20_000);
+const priceConfirmationRequired = await evaluate("document.querySelector('#checkout-continue-label').textContent === 'Confirm updated total'");
+if (priceConfirmationRequired) {
+  await evaluate("document.querySelector('#billing-contact-form').requestSubmit()");
+}
+await waitFor("!document.querySelector('#payment-step').hidden", 20_000);
 await waitFor("!document.querySelector('#payment-submit').disabled", 20_000);
 const paymentStep = await evaluate(`(() => ({
   billingHidden: document.querySelector('#billing-step').hidden,
   paymentVisible: !document.querySelector('#payment-step').hidden,
   cardMounted: document.querySelector('#card-container').childElementCount > 0,
-  payEnabled: !document.querySelector('#payment-submit').disabled
+  payEnabled: !document.querySelector('#payment-submit').disabled,
+  checkoutSessionPersisted: (() => {
+    const session = JSON.parse(sessionStorage.getItem('mariachi-fiesta-checkout-v1') || 'null');
+    return Boolean(session?.orderKey && session?.paymentKey && session?.signature);
+  })()
 }))()`);
-assert.deepEqual(paymentStep, { billingHidden: true, paymentVisible: true, cardMounted: true, payEnabled: true });
+assert.deepEqual(paymentStep, { billingHidden: true, paymentVisible: true, cardMounted: true, payEnabled: true, checkoutSessionPersisted: true });
 
 await evaluate("document.querySelector('#checkout-close').click(); document.querySelector('.site-footer').scrollIntoView({ block: 'end' })");
 await new Promise((resolve) => setTimeout(resolve, 500));

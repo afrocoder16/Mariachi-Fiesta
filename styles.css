@@ -487,6 +487,7 @@ section[id] { scroll-margin-top: 110px; }
 .sandbox-note { margin: .8rem 0 1.2rem; padding: .75rem; background: var(--cream); border-left: 4px solid var(--marigold); font-size: .7rem; line-height: 1.5; }
 .payment-submit { width: 100%; }
 .payment-status { min-height: 1.5rem; margin: 1rem 0 0; color: var(--terracotta-dark); font-size: .85rem; font-weight: 700; line-height: 1.5; }
+.payment-status.is-warning { padding: 1rem; color: var(--ink); background: color-mix(in srgb, var(--marigold) 18%, var(--cream-light)); border-left: 4px solid var(--marigold); }
 .payment-status.is-success { padding: 1rem; color: var(--cream-light); background: var(--agave); }
 .payment-status a { color: var(--marigold); }
 

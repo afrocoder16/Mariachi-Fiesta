@@ -415,6 +415,8 @@ if (menuBody && menuFilters && Array.isArray(menuData)) {
   const billingStepIndicator = document.getElementById('billing-step-indicator');
   const paymentStepIndicator = document.getElementById('payment-step-indicator');
   const billingContactForm = document.getElementById('billing-contact-form');
+  const checkoutContinue = document.getElementById('checkout-continue');
+  const checkoutContinueLabel = document.getElementById('checkout-continue-label');
   const billingBack = document.getElementById('billing-back');
   const paymentForm = document.getElementById('payment-form');
   const paymentSubmit = document.getElementById('payment-submit');
@@ -428,6 +430,11 @@ if (menuBody && menuFilters && Array.isArray(menuData)) {
   let squareCard;
   let cardInitialization;
   let lastFocusedElement;
+  let checkoutQuote;
+  let checkoutSession;
+  let paymentSourceId;
+
+  const CHECKOUT_SESSION_KEY = 'mariachi-fiesta-checkout-v1';
 
   const escapeSquareHtml = (value) =>
     String(value ?? '').replace(/[&<>"]/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[character]));
@@ -439,7 +446,12 @@ if (menuBody && menuFilters && Array.isArray(menuData)) {
   async function fetchJson(url, options) {
     const response = await fetch(url, options);
     const payload = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(payload.error || `Request failed with HTTP ${response.status}`);
+    if (!response.ok) {
+      const error = new Error(payload.error || `Request failed with HTTP ${response.status}`);
+      error.status = response.status;
+      error.payload = payload;
+      throw error;
+    }
     return payload;
   }
 
@@ -728,6 +740,86 @@ if (menuBody && menuFilters && Array.isArray(menuData)) {
     };
   }
 
+  async function checkoutSignature(contact, items) {
+    const value = JSON.stringify({
+      cart: items
+        .map((item) => ({ variationId: item.variationId, quantity: item.quantity }))
+        .sort((a, b) => a.variationId.localeCompare(b.variationId)),
+      contact,
+    });
+    const digest = await window.crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
+    return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+  }
+
+  function readCheckoutSession() {
+    try {
+      const stored = JSON.parse(window.sessionStorage.getItem(CHECKOUT_SESSION_KEY) || 'null');
+      const validKey = (value) => typeof value === 'string' && /^[a-zA-Z0-9_-]{8,128}$/.test(value);
+      return stored && typeof stored.signature === 'string' && validKey(stored.orderKey) && validKey(stored.paymentKey)
+        ? stored
+        : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function saveCheckoutSession(session) {
+    try {
+      window.sessionStorage.setItem(CHECKOUT_SESSION_KEY, JSON.stringify(session));
+    } catch {
+      // The in-memory session still protects retries when browser storage is unavailable.
+    }
+  }
+
+  async function ensureCheckoutSession(contact, items) {
+    const signature = await checkoutSignature(contact, items);
+    const stored = readCheckoutSession();
+    const next = stored?.signature === signature
+      ? stored
+      : { signature, orderKey: window.crypto.randomUUID(), paymentKey: window.crypto.randomUUID() };
+
+    if (checkoutSession?.orderKey !== next.orderKey) paymentSourceId = null;
+    checkoutSession = next;
+    saveCheckoutSession(next);
+    return next;
+  }
+
+  function rotatePaymentAttempt() {
+    if (!checkoutSession) return;
+    checkoutSession = { ...checkoutSession, paymentKey: window.crypto.randomUUID() };
+    paymentSourceId = null;
+    saveCheckoutSession(checkoutSession);
+  }
+
+  function clearCheckoutSession() {
+    checkoutQuote = null;
+    checkoutSession = null;
+    paymentSourceId = null;
+    try {
+      window.sessionStorage.removeItem(CHECKOUT_SESSION_KEY);
+    } catch {
+      // Nothing else is required when storage is unavailable.
+    }
+  }
+
+  function checkoutRequestBody(contact, expectedAmount, expectedCurrency) {
+    const items = cart.getItems();
+    return {
+      orderIdempotencyKey: checkoutSession.orderKey,
+      cart: items.map((item) => ({ variationId: item.variationId, quantity: item.quantity })),
+      billingContact: contact,
+      expectedAmount,
+      expectedCurrency,
+    };
+  }
+
+  function applyCheckoutQuote(quote) {
+    if (!quote) return;
+    cart.syncWithCatalog(quote.items || []);
+    checkoutQuote = { ...quote, orderKey: checkoutSession?.orderKey };
+    checkoutTotal.textContent = formatMoney(quote.amount, quote.currency);
+  }
+
   async function initializeCard() {
     if (squareCard) {
       paymentSubmit.disabled = false;
@@ -763,20 +855,60 @@ if (menuBody && menuFilters && Array.isArray(menuData)) {
     document.getElementById('billing-full-name')?.focus();
   });
 
-  billingContactForm.addEventListener('submit', (event) => {
+  billingContactForm.addEventListener('submit', async (event) => {
     event.preventDefault();
 
     const requiredFields = billingContactForm.querySelectorAll('input[required]');
     requiredFields.forEach((field) => field.setCustomValidity(field.value.trim() ? '' : 'This field is required.'));
     if (!billingContactForm.reportValidity()) return;
+    if (!cart.getItems().length) return;
 
     const stateField = document.getElementById('billing-state');
     stateField.value = stateField.value.trim().toUpperCase();
-    showPaymentStep();
-    initializeCard().catch(() => {});
+    checkoutContinue.disabled = true;
+    checkoutContinueLabel.textContent = 'Checking total…';
+    paymentStatus.className = 'payment-status';
+    paymentStatus.textContent = '';
+
+    try {
+      const contact = getBillingContact();
+      const items = cart.getItems();
+      const session = await ensureCheckoutSession(contact, items);
+      const confirmedQuote = checkoutQuote?.orderKey === session.orderKey ? checkoutQuote : null;
+      const expectedAmount = confirmedQuote?.amount ?? cart.calculateTotal();
+      const expectedCurrency = confirmedQuote?.currency || items[0]?.currency || 'USD';
+      const result = await fetchJson('/api/checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(checkoutRequestBody(contact, expectedAmount, expectedCurrency)),
+      });
+
+      applyCheckoutQuote(result.checkout);
+      checkoutContinueLabel.textContent = 'Continue to payment';
+      showPaymentStep();
+      await initializeCard();
+    } catch (error) {
+      if (error.payload?.code === 'PRICE_CHANGED' && error.payload.checkout) {
+        applyCheckoutQuote(error.payload.checkout);
+        checkoutContinueLabel.textContent = 'Confirm updated total';
+        paymentStatus.className = 'payment-status is-warning';
+        paymentStatus.textContent = `Your order total changed to ${formatMoney(error.payload.checkout.amount, error.payload.checkout.currency)}. Review it and confirm before entering payment.`;
+      } else {
+        checkoutContinueLabel.textContent = 'Try again';
+        paymentStatus.textContent = error.message || 'The order total could not be verified. Please try again.';
+      }
+    } finally {
+      checkoutContinue.disabled = false;
+    }
   });
 
-  billingContactForm.addEventListener('input', (event) => event.target.setCustomValidity(''));
+  billingContactForm.addEventListener('input', (event) => {
+    event.target.setCustomValidity('');
+    checkoutQuote = null;
+    checkoutSession = null;
+    paymentSourceId = null;
+    checkoutContinueLabel.textContent = 'Continue to payment';
+  });
   billingBack.addEventListener('click', () => {
     showBillingStep();
     document.getElementById('billing-full-name')?.focus();
@@ -790,7 +922,11 @@ if (menuBody && menuFilters && Array.isArray(menuData)) {
   paymentForm.addEventListener('submit', async (event) => {
     event.preventDefault();
     const items = cart.getItems();
-    if (!items.length) return;
+    if (!items.length || !checkoutQuote || !checkoutSession) {
+      showBillingStep();
+      paymentStatus.textContent = 'Please confirm your contact information and current order total again.';
+      return;
+    }
 
     paymentSubmit.disabled = true;
     paymentSubmitLabel.textContent = 'Processing…';
@@ -800,17 +936,21 @@ if (menuBody && menuFilters && Array.isArray(menuData)) {
     try {
       const card = await initializeCard();
       const config = await squareConfigPromise;
-      const tokenResult = await card.tokenize({
-        amount: (cart.calculateTotal() / 100).toFixed(2),
-        currencyCode: items[0]?.currency || config.currency,
-        intent: 'CHARGE',
-        customerInitiated: true,
-        sellerKeyedIn: false,
-        billingContact: getBillingContact(),
-      });
-      if (tokenResult.status !== 'OK') {
-        const details = (tokenResult.errors || []).map((error) => error.message).filter(Boolean).join(' ');
-        throw new Error(details || `Card tokenization failed (${tokenResult.status}).`);
+      const contact = getBillingContact();
+      if (!paymentSourceId) {
+        const tokenResult = await card.tokenize({
+          amount: (checkoutQuote.amount / 100).toFixed(2),
+          currencyCode: checkoutQuote.currency || config.currency,
+          intent: 'CHARGE',
+          customerInitiated: true,
+          sellerKeyedIn: false,
+          billingContact: contact,
+        });
+        if (tokenResult.status !== 'OK') {
+          const details = (tokenResult.errors || []).map((error) => error.message).filter(Boolean).join(' ');
+          throw new Error(details || `Card tokenization failed (${tokenResult.status}).`);
+        }
+        paymentSourceId = tokenResult.token;
       }
 
       console.log('[Square] Card tokenized; sending payment request');
@@ -818,9 +958,9 @@ if (menuBody && menuFilters && Array.isArray(menuData)) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          sourceId: tokenResult.token,
-          idempotencyKey: window.crypto.randomUUID(),
-          cart: items.map((item) => ({ variationId: item.variationId, quantity: item.quantity })),
+          ...checkoutRequestBody(contact, checkoutQuote.amount, checkoutQuote.currency),
+          paymentIdempotencyKey: checkoutSession.paymentKey,
+          sourceId: paymentSourceId,
         }),
       });
 
@@ -828,6 +968,7 @@ if (menuBody && menuFilters && Array.isArray(menuData)) {
       cart.clear();
       paymentStep.hidden = true;
       billingContactForm.reset();
+      clearCheckoutSession();
       paymentStatus.className = 'payment-status is-success';
       paymentStatus.textContent = `Payment successful — ${formatMoney(result.payment.amount, result.payment.currency)} paid.`;
       if (result.payment.receiptUrl) {
@@ -839,7 +980,17 @@ if (menuBody && menuFilters && Array.isArray(menuData)) {
         paymentStatus.append(receipt);
       }
     } catch (error) {
-      paymentStatus.textContent = error.message || 'Payment could not be completed. Please try again.';
+      if (error.payload?.code === 'PRICE_CHANGED' && error.payload.checkout) {
+        paymentSourceId = null;
+        applyCheckoutQuote(error.payload.checkout);
+        showBillingStep();
+        checkoutContinueLabel.textContent = 'Confirm updated total';
+        paymentStatus.className = 'payment-status is-warning';
+        paymentStatus.textContent = `Your order total changed to ${formatMoney(error.payload.checkout.amount, error.payload.checkout.currency)}. Confirm it before trying payment again.`;
+      } else {
+        if (error.payload?.code === 'PAYMENT_RETRY_ALLOWED') rotatePaymentAttempt();
+        paymentStatus.textContent = error.message || 'Payment could not be completed. Please try again.';
+      }
       console.error('[Square] Payment failed:', error.message);
       paymentSubmit.disabled = false;
     } finally {
