@@ -12,7 +12,7 @@ Production website and Square-powered online ordering for Mariachi Fiesta in Mar
 | `styles.css` | Site styles, responsive layouts, and motion |
 | `script.js` | Website UI, menu rendering, cart, and checkout flow |
 | `shopping-cart.js` | Cart state and local storage |
-| `square-config.js` | Server-side Square Catalog and Payments integration |
+| `square-config.js` | Server-side Square Catalog, Orders, Customers, and Payments integration |
 | `site-config.js` | Public site configuration exposed by the server |
 | `server.js` | Node server and API routes |
 | `images/` | Optimized WebP assets used by the live website |
@@ -21,7 +21,7 @@ Production website and Square-powered online ordering for Mariachi Fiesta in Mar
 
 ## Local setup
 
-Requirements: Node.js 20 or newer and Square developer credentials.
+Requirements: Node.js 22.22.3 (the supported 22.x production runtime) and Square developer credentials.
 
 1. Copy `.env.example` to `.env`.
 2. Add the appropriate Square application, access token, and location values.
@@ -48,7 +48,9 @@ For a live launch:
 - use HTTPS;
 - set `SQUARE_ENVIRONMENT=production`;
 - use production Square credentials from the Square Developer Console;
+- confirm the token can read Catalog data and read/write Orders, Customers, and Payments;
 - confirm the production location ID and API version;
+- verify required item modifiers, inclusive tax, and smart tip options against Square;
 - complete a real low-value order and verify it in Square before advertising online ordering.
 
 The current `.env.example` values are placeholders and safe to commit.

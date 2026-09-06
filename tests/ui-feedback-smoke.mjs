@@ -66,9 +66,11 @@ await send('Page.enable');
 await send('Runtime.enable');
 await send('Network.enable');
 await send('Network.setCacheDisabled', { cacheDisabled: true });
+await send('Storage.clearDataForOrigin', { origin: 'http://localhost:3000', storageTypes: 'local_storage,session_storage' });
 await send('Emulation.setDeviceMetricsOverride', { width: 1900, height: 1000, deviceScaleFactor: 1, mobile: false });
 await send('Page.navigate', { url: 'http://localhost:3000' });
 await waitFor("document.readyState === 'complete' && document.querySelector('.weekly-promo__media img')?.complete");
+await waitFor("Array.from(document.querySelectorAll('.menu-item[data-item-id] .menu-item__name')).some((node) => node.textContent.trim() === 'Pollo Asado')", 20_000);
 
 const structure = await evaluate(`(() => ({
   removedOrderExplainer: !document.querySelector('#order-online'),
@@ -86,6 +88,128 @@ assert.equal(structure.promoUsesWebp, true);
 assert.equal(structure.ownerLabel, 'Owner');
 assert.equal(structure.storyHasOldOwnershipYear, false);
 assert.deepEqual(structure.storyValueLabels, ['Local roots', 'Generous plates', 'Personal welcome']);
+
+await evaluate(`(() => {
+  const row = Array.from(document.querySelectorAll('.menu-item[data-item-id]')).find(
+    (item) => item.querySelector('.menu-item__name')?.textContent.trim() === 'Pollo Asado'
+  );
+  row.querySelector('.menu-item__details').click();
+})()`);
+await waitFor("document.querySelector('#item-options-dialog').open && document.querySelector('#item-options-image').complete");
+const dishDetails = await evaluate(`(() => ({
+  title: document.querySelector('#item-options-title').textContent.trim(),
+  description: document.querySelector('#item-options-description').textContent.trim(),
+  imageVisible: !document.querySelector('#item-options-media').hidden,
+  imageLoaded: document.querySelector('#item-options-image').naturalWidth > 0,
+  imageFit: getComputedStyle(document.querySelector('#item-options-image')).objectFit
+}))()`);
+assert.equal(dishDetails.title, 'Pollo Asado');
+assert.ok(dishDetails.description.length > 20, JSON.stringify(dishDetails));
+assert.equal(dishDetails.imageVisible, true, JSON.stringify(dishDetails));
+assert.equal(dishDetails.imageLoaded, true, JSON.stringify(dishDetails));
+assert.equal(dishDetails.imageFit, 'contain', JSON.stringify(dishDetails));
+await captureElement('#item-options-dialog', 'ui-check-dish-details.png');
+await evaluate("document.querySelector('#item-options-close').click()");
+
+await evaluate(`(() => {
+  const row = Array.from(document.querySelectorAll('.menu-item[data-item-id]')).find(
+    (item) => item.querySelector('.menu-item__name')?.textContent.trim() === 'Pollo Asado'
+  );
+  row.querySelector('.add-to-cart').click();
+})()`);
+await waitFor("document.querySelector('#item-options-dialog').open");
+const modifiers = await evaluate(`(() => {
+  const checked = document.querySelector('#item-modifier-options input[data-modifier-id]:checked');
+  return {
+    title: document.querySelector('#item-options-title').textContent.trim(),
+    group: document.querySelector('#item-modifier-options legend').textContent.trim(),
+    choices: Array.from(document.querySelectorAll('#item-modifier-options input[data-modifier-id]')).map((input) => input.nextElementSibling.textContent.trim()),
+    defaultChoice: checked?.nextElementSibling.textContent.trim(),
+    required: document.querySelector('#item-modifier-options .item-option-group__hint').textContent.includes('required')
+  };
+})()`);
+assert.deepEqual(modifiers, {
+  title: 'Pollo Asado',
+  group: 'Tortilla Choice',
+  choices: ['Corn Tortilla', 'Flour Tortilla', 'None'],
+  defaultChoice: 'Corn Tortilla',
+  required: true,
+});
+await captureElement('#item-options-dialog', 'ui-check-item-options.png');
+await evaluate("document.querySelector('#item-options-form').requestSubmit()");
+await waitFor("document.querySelector('#cart-count').textContent === '1'");
+const configuredCartLine = await evaluate("document.querySelector('.cart-line__mods')?.textContent.trim()");
+assert.equal(configuredCartLine, 'Corn Tortilla');
+
+await evaluate(`(() => {
+  const chip = Array.from(document.querySelectorAll('#menu-filters .menu-chip')).find(
+    (button) => button.textContent.trim() === 'Appetizers'
+  );
+  chip.click();
+})()`);
+await waitFor("document.querySelector('#menu-filters .menu-chip[aria-pressed=\"true\"]')?.textContent.trim() === 'Appetizers' && !document.querySelector('#menu-stage').classList.contains('is-switching')");
+await evaluate(`(() => {
+  document.documentElement.style.scrollBehavior = 'auto';
+  const visible = Array.from(document.querySelectorAll('.menu-item[data-item-id]')).filter((item) => !item.hidden);
+  visible.at(-1).scrollIntoView({ block: 'center' });
+})()`);
+await new Promise((resolve) => setTimeout(resolve, 250));
+const deepMenuStageTop = await evaluate("Math.round(document.querySelector('#menu-stage').getBoundingClientRect().top)");
+
+await evaluate(`(() => {
+  const chip = Array.from(document.querySelectorAll('#menu-filters .menu-chip')).find(
+    (button) => button.textContent.trim() === 'Burritos'
+  );
+  chip.click();
+})()`);
+await waitFor("document.querySelector('#menu-filters .menu-chip[aria-pressed=\"true\"]')?.textContent.trim() === 'Burritos' && !document.querySelector('#menu-stage').classList.contains('is-switching')");
+await new Promise((resolve) => setTimeout(resolve, 550));
+const stableMenu = await evaluate(`(() => ({
+  visibleItems: Array.from(document.querySelectorAll('.menu-item[data-item-id]')).filter((item) => !item.hidden).length,
+  stageHeight: Math.round(document.querySelector('#menu-stage').getBoundingClientRect().height),
+  stageMinHeight: Math.round(parseFloat(getComputedStyle(document.querySelector('#menu-stage')).minHeight)),
+  stageTop: Math.round(document.querySelector('#menu-stage').getBoundingClientRect().top),
+  controlsBottom: Math.round(document.querySelector('.menu-controls').getBoundingClientRect().bottom),
+  exploreVisible: !document.querySelector('#menu-explore').hidden,
+  activeHeading: Array.from(document.querySelectorAll('.menu-group:not([hidden]) h3')).map((heading) => heading.textContent.trim())
+}))()`);
+assert.ok(deepMenuStageTop < 0, JSON.stringify({ deepMenuStageTop }));
+assert.ok(stableMenu.visibleItems > 0 && stableMenu.visibleItems <= 4, JSON.stringify(stableMenu));
+assert.ok(stableMenu.stageHeight >= stableMenu.stageMinHeight, JSON.stringify(stableMenu));
+assert.ok(stableMenu.stageTop >= stableMenu.controlsBottom && stableMenu.stageTop - stableMenu.controlsBottom <= 24, JSON.stringify(stableMenu));
+assert.equal(stableMenu.exploreVisible, true, JSON.stringify(stableMenu));
+assert.deepEqual(stableMenu.activeHeading, ['Burritos']);
+const failedThumbnail = await evaluate(`(() => {
+  const row = Array.from(document.querySelectorAll('.menu-item[data-item-id]')).find(
+    (item) => item.querySelector('.menu-item__name')?.textContent.trim() === 'Fiesta Burrito'
+  );
+  row.querySelector('.menu-item__thumb img').dispatchEvent(new Event('error'));
+  row.classList.add('menu-item--photo');
+  const details = row.querySelector('.menu-item__details').getBoundingClientRect();
+  const copy = row.querySelector('.menu-item__copy').getBoundingClientRect();
+  const order = row.querySelector('.menu-item__order').getBoundingClientRect();
+  return {
+    thumbnailRemoved: !row.querySelector('.menu-item__thumb'),
+    copyRatio: copy.width / details.width,
+    orderOffset: Math.round(order.left - details.left)
+  };
+})()`);
+assert.equal(failedThumbnail.thumbnailRemoved, true, JSON.stringify(failedThumbnail));
+assert.ok(failedThumbnail.copyRatio > 0.95, JSON.stringify(failedThumbnail));
+assert.ok(Math.abs(failedThumbnail.orderOffset) <= 1, JSON.stringify(failedThumbnail));
+await captureElement('#menu-stage', 'ui-check-menu-stage.png');
+
+await evaluate("document.querySelector('#cart-toggle').click(); document.querySelector('#checkout-button').click()");
+await waitFor("document.querySelector('#checkout-dialog').open");
+const pickupNote = await evaluate(`(() => ({
+  visible: Boolean(document.querySelector('#customer-note')?.offsetParent),
+  optional: document.querySelector('.billing-field--note > span').textContent.includes('optional'),
+  maxLength: document.querySelector('#customer-note').maxLength,
+  counter: document.querySelector('#customer-note-count').textContent.trim()
+}))()`);
+assert.deepEqual(pickupNote, { visible: true, optional: true, maxLength: 500, counter: '0/500' });
+await captureElement('#checkout-dialog', 'ui-check-pickup-note.png');
+await evaluate("document.querySelector('#checkout-close').click()");
 
 await evaluate("document.querySelector('#specials').scrollIntoView({ block: 'start' })");
 await new Promise((resolve) => setTimeout(resolve, 1100));
@@ -130,7 +254,47 @@ assert.equal(mobile.imageLoaded, true, JSON.stringify(mobile));
 assert.equal(mobile.promoColumns.split(' ').length, 1, JSON.stringify(mobile));
 await captureElement('#specials', 'ui-check-weekly-feature-mobile.png');
 
+await evaluate("document.querySelector('#menu').scrollIntoView({ block: 'start' })");
+await new Promise((resolve) => setTimeout(resolve, 500));
+const mobileMenu = await evaluate(`(() => ({
+  viewport: document.documentElement.clientWidth,
+  documentWidth: document.documentElement.scrollWidth,
+  stageMinHeight: Math.round(parseFloat(getComputedStyle(document.querySelector('#menu-stage')).minHeight)),
+  exploreColumns: getComputedStyle(document.querySelector('#menu-explore-links')).gridTemplateColumns,
+  visibleItems: Array.from(document.querySelectorAll('.menu-item[data-item-id]')).filter((item) => !item.hidden).length,
+  failedImageCopyRatio: (() => {
+    const row = Array.from(document.querySelectorAll('.menu-item[data-item-id]')).find(
+      (item) => item.querySelector('.menu-item__name')?.textContent.trim() === 'Fiesta Burrito'
+    );
+    return row.querySelector('.menu-item__copy').getBoundingClientRect().width / row.querySelector('.menu-item__details').getBoundingClientRect().width;
+  })()
+}))()`);
+assert.equal(mobileMenu.documentWidth, mobileMenu.viewport, JSON.stringify(mobileMenu));
+assert.ok(mobileMenu.stageMinHeight >= 600, JSON.stringify(mobileMenu));
+assert.equal(mobileMenu.exploreColumns.split(' ').length, 1, JSON.stringify(mobileMenu));
+assert.equal(mobileMenu.visibleItems, 2, JSON.stringify(mobileMenu));
+assert.ok(mobileMenu.failedImageCopyRatio > 0.95, JSON.stringify(mobileMenu));
+await captureElement('#menu-stage', 'ui-check-menu-stage-mobile.png');
+
+await evaluate(`(() => {
+  const row = Array.from(document.querySelectorAll('.menu-item[data-item-id]')).find(
+    (item) => item.querySelector('.menu-item__name')?.textContent.trim() === 'Fiesta Burrito'
+  );
+  row.querySelector('.menu-item__details').click();
+})()`);
+await waitFor("document.querySelector('#item-options-dialog').open");
+const mobileDialog = await evaluate(`(() => ({
+  width: Math.round(document.querySelector('#item-options-dialog').getBoundingClientRect().width),
+  viewport: document.documentElement.clientWidth,
+  imageFit: getComputedStyle(document.querySelector('#item-options-image')).objectFit,
+  scrollable: document.querySelector('#item-options-dialog').scrollHeight > document.querySelector('#item-options-dialog').clientHeight
+}))()`);
+assert.ok(mobileDialog.width <= mobileDialog.viewport - 16, JSON.stringify(mobileDialog));
+assert.equal(mobileDialog.imageFit, 'contain', JSON.stringify(mobileDialog));
+await captureElement('#item-options-dialog', 'ui-check-dish-details-mobile.png');
+await evaluate("document.querySelector('#item-options-close').click()");
+
 const unexpectedRuntimeErrors = runtimeErrors.filter((error) => !error.includes('Square Web Payments SDK did not load'));
 assert.deepEqual(unexpectedRuntimeErrors, []);
 socket.close();
-console.log(JSON.stringify({ structure, desktop, mobile, externalSdkUnavailable: runtimeErrors.length > 0 }, null, 2));
+console.log(JSON.stringify({ structure, dishDetails, modifiers, configuredCartLine, stableMenu, failedThumbnail, pickupNote, desktop, mobile, mobileMenu, mobileDialog, externalSdkUnavailable: runtimeErrors.length > 0 }, null, 2));

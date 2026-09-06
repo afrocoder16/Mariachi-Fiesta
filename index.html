@@ -199,14 +199,25 @@
             </div>
           </div>
 
-          <p class="visually-hidden" id="menu-status" role="status"></p>
-          <div class="menu-body" id="menu-body">
-            <p class="menu-loading" role="status">Loading today&rsquo;s Square menu&hellip;</p>
-          </div>
+          <div class="menu-stage" id="menu-stage">
+            <p class="visually-hidden" id="menu-status" role="status"></p>
+            <div class="menu-body" id="menu-body">
+              <p class="menu-loading" role="status">Loading today&rsquo;s Square menu&hellip;</p>
+            </div>
 
-          <p class="menu-empty" id="menu-empty" hidden>
-            No dishes match that search. <button type="button" id="menu-reset">Show the full menu</button>
-          </p>
+            <p class="menu-empty" id="menu-empty" hidden>
+              No dishes match that search. <button type="button" id="menu-reset">Show the full menu</button>
+            </p>
+
+            <aside class="menu-explore" id="menu-explore" aria-labelledby="menu-explore-title" hidden>
+              <div>
+                <p class="eyebrow">Keep exploring</p>
+                <h3 id="menu-explore-title">Still hungry?</h3>
+                <p>Jump to another guest favorite without losing your place.</p>
+              </div>
+              <div class="menu-explore__links" id="menu-explore-links"></div>
+            </aside>
+          </div>
 
           <div class="menu-footer reveal">
             <div>
@@ -370,10 +381,29 @@
       <ul class="cart-list" id="cart-list"></ul>
       <div class="cart-drawer__footer">
         <div class="cart-total"><span>Total</span><strong id="cart-total">$0.00</strong></div>
-        <p>Your total is verified against the current Square catalog before payment.</p>
+        <p>Menu prices include applicable sales tax. Your total is verified against the current Square catalog before payment.</p>
         <button class="button button--green" id="checkout-button" type="button" disabled><span>Secure checkout</span><span aria-hidden="true">&rarr;</span></button>
       </div>
     </aside>
+
+    <dialog class="item-options-dialog" id="item-options-dialog" aria-labelledby="item-options-title">
+      <button class="icon-button item-options-dialog__close" id="item-options-close" type="button" aria-label="Close item options">&times;</button>
+      <p class="eyebrow" id="item-options-eyebrow">Menu details</p>
+      <h2 id="item-options-title">Choose your options.</h2>
+      <figure class="item-options-dialog__media" id="item-options-media" hidden>
+        <img id="item-options-image" alt="" decoding="async" />
+      </figure>
+      <p class="item-options-dialog__description" id="item-options-description"></p>
+      <form id="item-options-form">
+        <div id="item-variation-options"></div>
+        <div class="item-modifier-options" id="item-modifier-options"></div>
+        <p class="item-options-status" id="item-options-status" role="alert" aria-live="assertive"></p>
+        <div class="item-options-total"><span>Item total</span><strong id="item-options-total">$0.00</strong></div>
+        <button class="button button--green item-options-submit" id="item-options-submit" type="submit">
+          <span>Add to cart</span><span aria-hidden="true">&rarr;</span>
+        </button>
+      </form>
+    </dialog>
 
     <dialog class="checkout-dialog" id="checkout-dialog" aria-labelledby="checkout-title">
       <button class="icon-button checkout-dialog__close" id="checkout-close" type="button" aria-label="Close checkout">&times;</button>
@@ -382,6 +412,13 @@
       <div class="checkout-summary">
         <span id="checkout-count">0 items</span><strong id="checkout-total">$0.00</strong>
       </div>
+      <dl class="checkout-breakdown" id="checkout-breakdown" hidden>
+        <div><dt>Food &amp; drink</dt><dd id="checkout-subtotal">$0.00</dd></div>
+        <div><dt id="checkout-tax-label">Sales tax</dt><dd id="checkout-tax">$0.00</dd></div>
+        <div id="checkout-discount-row" hidden><dt>Discount</dt><dd id="checkout-discount">&minus;$0.00</dd></div>
+        <div><dt>Tip</dt><dd id="checkout-tip">$0.00</dd></div>
+        <div class="checkout-breakdown__total"><dt>Total due</dt><dd id="checkout-grand-total">$0.00</dd></div>
+      </dl>
       <ol class="checkout-steps" aria-label="Checkout progress">
         <li id="billing-step-indicator" aria-current="step">1. Billing</li>
         <li id="payment-step-indicator">2. Payment</li>
@@ -389,7 +426,7 @@
 
       <section class="checkout-step" id="billing-step" aria-labelledby="billing-title">
         <h3 id="billing-title">Billing contact</h3>
-        <p>Enter the billing details associated with your payment method.</p>
+        <p>Enter your contact and billing details. Your name, email, and phone are saved with the order in Square for pickup support&mdash;this does not sign you up for marketing.</p>
         <form id="billing-contact-form">
           <div class="billing-fields">
             <label class="billing-field billing-field--wide">
@@ -399,6 +436,10 @@
             <label class="billing-field billing-field--wide">
               <span>Email <b aria-hidden="true">*</b></span>
               <input id="billing-email" name="email" type="email" autocomplete="email" required />
+            </label>
+            <label class="billing-field billing-field--wide">
+              <span>Phone <b aria-hidden="true">*</b></span>
+              <input id="billing-phone" name="phone" type="tel" inputmode="tel" autocomplete="tel" maxlength="20" placeholder="(507) 555-0123" title="Enter a 10-digit US phone number" required />
             </label>
             <label class="billing-field billing-field--wide">
               <span>Address <b aria-hidden="true">*</b></span>
@@ -416,6 +457,11 @@
               <span>Postal Code <b aria-hidden="true">*</b></span>
               <input id="billing-postal-code" name="postalCode" type="text" inputmode="numeric" autocomplete="postal-code" pattern="[0-9]{5}(-[0-9]{4})?" placeholder="56258" title="Enter a five-digit ZIP code or ZIP+4" required />
             </label>
+            <label class="billing-field billing-field--wide billing-field--note">
+              <span>Pickup note <small>(optional)</small></span>
+              <textarea id="customer-note" name="customerNote" rows="3" maxlength="500" placeholder="Add pickup instructions or a request for the restaurant."></textarea>
+              <small class="billing-field__help">For allergies or urgent requests, please call us before ordering. <span id="customer-note-count">0/500</span></small>
+            </label>
           </div>
           <label class="policy-consent">
             <input id="policy-consent" name="policyConsent" type="checkbox" required />
@@ -429,10 +475,16 @@
 
       <section class="checkout-step" id="payment-step" aria-labelledby="payment-title" hidden>
         <div class="checkout-step__head">
-          <div><h3 id="payment-title">Card payment</h3><p>Payment details are securely collected by Square.</p></div>
+          <div><h3 id="payment-title">Card payment</h3><p>Payment details are securely collected by <strong>Square</strong>.</p></div>
           <button class="checkout-back" id="billing-back" type="button">&larr; Edit billing</button>
         </div>
         <form id="payment-form">
+          <fieldset class="tip-selector" id="tip-selector">
+            <legend>Add a tip</legend>
+            <p>Choose an optional tip for the Mariachi Fiesta team.</p>
+            <div class="tip-options" id="tip-options"></div>
+          </fieldset>
+          <p class="square-trust"><span aria-hidden="true">&#9632;</span> Secure card payment powered by <strong>Square</strong></p>
           <div class="square-card" id="card-container" aria-label="Card details"></div>
           <p class="sandbox-note">Sandbox test card: 4111 1111 1111 1111, any future expiry, CVV 111, postal code 55555.</p>
           <button class="button button--green payment-submit" id="payment-submit" type="submit" disabled>

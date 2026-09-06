@@ -254,6 +254,9 @@ const menuClear = document.querySelector('.menu-search__clear');
 const menuEmpty = document.getElementById('menu-empty');
 const menuReset = document.getElementById('menu-reset');
 const menuStatus = document.getElementById('menu-status');
+const menuStage = document.getElementById('menu-stage');
+const menuExplore = document.getElementById('menu-explore');
+const menuExploreLinks = document.getElementById('menu-explore-links');
 const menuData = window.MARIACHI_MENU;
 
 if (menuBody && menuFilters && Array.isArray(menuData)) {
@@ -423,8 +426,32 @@ if (menuBody && menuFilters && Array.isArray(menuData)) {
   const paymentSubmitLabel = document.getElementById('payment-submit-label');
   const paymentStatus = document.getElementById('payment-status');
   const sandboxNote = document.querySelector('.sandbox-note');
+  const itemOptionsDialog = document.getElementById('item-options-dialog');
+  const itemOptionsClose = document.getElementById('item-options-close');
+  const itemOptionsEyebrow = document.getElementById('item-options-eyebrow');
+  const itemOptionsTitle = document.getElementById('item-options-title');
+  const itemOptionsMedia = document.getElementById('item-options-media');
+  const itemOptionsImage = document.getElementById('item-options-image');
+  const itemOptionsDescription = document.getElementById('item-options-description');
+  const itemOptionsForm = document.getElementById('item-options-form');
+  const itemVariationOptions = document.getElementById('item-variation-options');
+  const itemModifierOptions = document.getElementById('item-modifier-options');
+  const itemOptionsStatus = document.getElementById('item-options-status');
+  const itemOptionsTotal = document.getElementById('item-options-total');
+  const checkoutBreakdown = document.getElementById('checkout-breakdown');
+  const checkoutSubtotal = document.getElementById('checkout-subtotal');
+  const checkoutTaxLabel = document.getElementById('checkout-tax-label');
+  const checkoutTax = document.getElementById('checkout-tax');
+  const checkoutDiscountRow = document.getElementById('checkout-discount-row');
+  const checkoutDiscount = document.getElementById('checkout-discount');
+  const checkoutTip = document.getElementById('checkout-tip');
+  const checkoutGrandTotal = document.getElementById('checkout-grand-total');
+  const tipOptions = document.getElementById('tip-options');
+  const customerNote = document.getElementById('customer-note');
+  const customerNoteCount = document.getElementById('customer-note-count');
 
   const liveItems = new Map();
+  const liveVariations = new Map();
   let liveGroups = [];
   let liveCategory = 'all';
   let squareCard;
@@ -433,8 +460,12 @@ if (menuBody && menuFilters && Array.isArray(menuData)) {
   let checkoutQuote;
   let checkoutSession;
   let paymentSourceId;
+  let selectedTipAmount = 0;
+  let activeCustomItem;
+  let activeCustomTrigger;
+  let categorySwitchTimer;
 
-  const CHECKOUT_SESSION_KEY = 'mariachi-fiesta-checkout-v1';
+  const CHECKOUT_SESSION_KEY = 'mariachi-fiesta-checkout-v2';
 
   const escapeSquareHtml = (value) =>
     String(value ?? '').replace(/[&<>"]/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[character]));
@@ -489,21 +520,49 @@ if (menuBody && menuFilters && Array.isArray(menuData)) {
   function renderSquareMenu(groups) {
     liveGroups = groups;
     liveItems.clear();
-    groups.forEach((group) => group.items.forEach((item) => liveItems.set(item.id, item)));
+    liveVariations.clear();
+    groups.forEach((group) => group.items.forEach((item) => {
+      liveItems.set(item.id, item);
+      item.variations.forEach((variation) => liveVariations.set(variation.id, { item, variation }));
+    }));
 
-    const catalogCartItems = groups.flatMap((group) =>
-      group.items.flatMap((item) =>
-        item.variations.map((variation) => ({
-          variationId: variation.id,
-          name: item.name,
-          variationName: variation.name,
-          price: variation.price,
-          currency: variation.currency,
-          quantity: 1,
-        }))
-      )
-    );
-    const removedItems = cart.syncWithCatalog(catalogCartItems);
+    const refreshedCart = cart.getItems().map((saved) => {
+      const catalogEntry = liveVariations.get(saved.variationId);
+      if (!catalogEntry) return null;
+      const { item, variation } = catalogEntry;
+      const lists = new Map((item.modifierLists || []).map((list) => [list.id, list]));
+      const refreshedModifiers = [];
+      for (const savedModifier of saved.modifiers || []) {
+        const list = lists.get(savedModifier.listId);
+        const modifier = list?.modifiers.find((entry) => entry.id === savedModifier.modifierId);
+        if (!list || !modifier || (!list.allowQuantities && savedModifier.quantity !== 1)) return null;
+        refreshedModifiers.push({
+          modifierId: modifier.id,
+          listId: list.id,
+          listName: list.name,
+          name: modifier.name,
+          price: modifier.price,
+          currency: modifier.currency,
+          quantity: savedModifier.quantity,
+        });
+      }
+      for (const list of item.modifierLists || []) {
+        const count = refreshedModifiers
+          .filter((modifier) => modifier.listId === list.id)
+          .reduce((total, modifier) => total + modifier.quantity, 0);
+        if (count < list.minSelected || (list.maxSelected > 0 && count > list.maxSelected)) return null;
+      }
+      return {
+        variationId: variation.id,
+        name: item.name,
+        variationName: variation.name,
+        price: variation.price,
+        currency: variation.currency,
+        modifiers: refreshedModifiers,
+        quantity: saved.quantity,
+      };
+    }).filter(Boolean);
+    const removedItems = cart.syncWithCatalog(refreshedCart);
     if (removedItems) console.warn(`[Square] Removed ${removedItems} unavailable item(s) from the saved cart`);
 
     menuFilters.innerHTML = [
@@ -535,15 +594,21 @@ if (menuBody && menuFilters && Array.isArray(menuData)) {
                 : `<input type="hidden" value="${escapeSquareHtml(item.variations[0].id)}" />`;
             const haystack = `${item.name} ${item.description || ''} ${group.title}`.toLowerCase();
 
+            const hasOptions = (item.modifierLists || []).some((list) => !list.hiddenFromCustomer);
             return `<li class="menu-item${imageUrl ? ' menu-item--photo' : ''}" data-item-id="${escapeSquareHtml(item.id)}" data-search="${escapeSquareHtml(haystack)}">
-              ${thumbnail}
-              <span class="menu-item__top">
-                <h4 class="menu-item__name">${escapeSquareHtml(item.name)}</h4>
-                <span class="menu-item__leader" aria-hidden="true"></span>
-                <span class="menu-item__price">${priceLabel(item.variations)}</span>
-              </span>
-              ${description}
-              <span class="menu-item__order">${selector}<button class="add-to-cart" type="button">Add to cart</button></span>
+              <button class="menu-item__details" type="button" aria-haspopup="dialog" aria-label="View details for ${escapeSquareHtml(item.name)}">
+                ${thumbnail}
+                <span class="menu-item__copy">
+                  <span class="menu-item__top">
+                    <h4 class="menu-item__name">${escapeSquareHtml(item.name)}</h4>
+                    <span class="menu-item__leader" aria-hidden="true"></span>
+                    <span class="menu-item__price">${priceLabel(item.variations)}</span>
+                  </span>
+                  ${description}
+                  <span class="menu-item__view">View details <span aria-hidden="true">&rarr;</span></span>
+                </span>
+              </button>
+              <span class="menu-item__order">${selector}<button class="add-to-cart" type="button">${hasOptions ? 'Customize' : 'Add to cart'}</button></span>
             </li>`;
           })
           .join('');
@@ -580,18 +645,86 @@ if (menuBody && menuFilters && Array.isArray(menuData)) {
     if (menuEmpty) menuEmpty.hidden = visibleTotal > 0;
     if (menuClear) menuClear.hidden = query.length === 0;
     if (menuStatus) menuStatus.textContent = `${visibleTotal} ${visibleTotal === 1 ? 'dish' : 'dishes'} shown.`;
+    renderMenuExplore(visibleTotal, query);
+  }
+
+  function renderMenuExplore(visibleTotal, query) {
+    if (!menuExplore || !menuExploreLinks) return;
+    const currentIndex = liveGroups.findIndex((group) => group.id === liveCategory);
+    const shouldShow = !query && liveCategory !== 'all' && visibleTotal > 0 && visibleTotal <= 4 && liveGroups.length > 1;
+    menuExplore.hidden = !shouldShow;
+    if (!shouldShow) {
+      menuExploreLinks.innerHTML = '';
+      return;
+    }
+
+    const suggestions = Array.from({ length: liveGroups.length - 1 }, (_, offset) =>
+      liveGroups[(currentIndex + offset + 1 + liveGroups.length) % liveGroups.length]
+    ).filter((group) => group.id !== liveCategory).slice(0, 3);
+    menuExploreLinks.innerHTML = suggestions.map((group) =>
+      `<button class="menu-explore__button" type="button" data-explore-category="${escapeSquareHtml(group.id)}"><span>${escapeSquareHtml(group.title)}</span><small>${itemCountLabel(group.items.length)} <span aria-hidden="true">&rarr;</span></small></button>`
+    ).join('');
+  }
+
+  function scrollCategoryChipIntoView(chip) {
+    if (!chip) return;
+    const left = chip.offsetLeft - (menuFilters.clientWidth - chip.offsetWidth) / 2;
+    menuFilters.scrollTo({ left: Math.max(0, left), behavior: reduceMotion ? 'auto' : 'smooth' });
+  }
+
+  function alignMenuStage() {
+    if (!menuStage) return 0;
+    const controls = document.querySelector('.menu-controls');
+    const stickyTop = controls ? Number.parseFloat(getComputedStyle(controls).top) || 0 : 0;
+    const controlsHeight = controls?.offsetHeight || 0;
+    const absoluteStageTop = window.scrollY + menuStage.getBoundingClientRect().top;
+    const targetTop = Math.max(0, absoluteStageTop - stickyTop - controlsHeight - 16);
+    const distance = Math.abs(window.scrollY - targetTop);
+    window.scrollTo({ top: targetTop, behavior: reduceMotion ? 'auto' : 'smooth' });
+    return distance;
+  }
+
+  function selectLiveCategory(category, chip) {
+    if (!liveGroups.length || (category !== 'all' && !liveGroups.some((group) => group.id === category))) return;
+    window.clearTimeout(categorySwitchTimer);
+    menuFilters.querySelectorAll('.menu-chip').forEach((button) =>
+      button.setAttribute('aria-pressed', String(button.dataset.category === category))
+    );
+    scrollCategoryChipIntoView(chip || menuFilters.querySelector(`[data-category="${CSS.escape(category)}"]`));
+    menuStage?.classList.add('is-switching');
+    menuStage?.setAttribute('aria-busy', 'true');
+    const distance = alignMenuStage();
+
+    const finishSwitch = () => {
+      liveCategory = category;
+      applySquareFilters();
+      window.requestAnimationFrame(() => {
+        menuStage?.classList.remove('is-switching');
+        menuStage?.removeAttribute('aria-busy');
+      });
+    };
+    if (reduceMotion) finishSwitch();
+    else categorySwitchTimer = window.setTimeout(finishSwitch, distance > 80 ? 220 : 120);
   }
 
   menuFilters.addEventListener('click', (event) => {
     const chip = event.target.closest('.menu-chip');
     if (!chip || !liveGroups.length) return;
-    liveCategory = chip.dataset.category;
-    menuFilters.querySelectorAll('.menu-chip').forEach((button) => button.setAttribute('aria-pressed', String(button === chip)));
-    chip.scrollIntoView({ block: 'nearest', inline: 'center', behavior: reduceMotion ? 'auto' : 'smooth' });
-    applySquareFilters();
+    selectLiveCategory(chip.dataset.category, chip);
   });
 
-  menuSearch?.addEventListener('input', applySquareFilters);
+  menuExploreLinks?.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-explore-category]');
+    if (!button) return;
+    selectLiveCategory(button.dataset.exploreCategory);
+  });
+
+  menuSearch?.addEventListener('input', () => {
+    window.clearTimeout(categorySwitchTimer);
+    menuStage?.classList.remove('is-switching');
+    menuStage?.removeAttribute('aria-busy');
+    applySquareFilters();
+  });
   menuClear?.addEventListener('click', () => {
     menuSearch.value = '';
     menuSearch.focus();
@@ -599,9 +732,7 @@ if (menuBody && menuFilters && Array.isArray(menuData)) {
   });
   menuReset?.addEventListener('click', () => {
     menuSearch.value = '';
-    liveCategory = 'all';
-    menuFilters.querySelectorAll('.menu-chip').forEach((button) => button.setAttribute('aria-pressed', String(button.dataset.category === 'all')));
-    applySquareFilters();
+    selectLiveCategory('all');
   });
 
   menuBody.addEventListener('error', (event) => {
@@ -612,7 +743,190 @@ if (menuBody && menuFilters && Array.isArray(menuData)) {
     }
   }, true);
 
+  function pulseCart(itemName, button) {
+    if (button) {
+      const original = button.dataset.originalLabel || button.textContent;
+      button.dataset.originalLabel = original;
+      button.textContent = 'Added!';
+      setTimeout(() => (button.textContent = original), 900);
+    }
+    if (cartAnnouncer) cartAnnouncer.textContent = `${itemName} added to your cart.`;
+    cartToggle.classList.remove('has-update');
+    void cartToggle.offsetWidth;
+    cartToggle.classList.add('has-update');
+    setTimeout(() => cartToggle.classList.remove('has-update'), 650);
+  }
+
+  function modifierPriceLabel(modifier) {
+    return modifier.price ? `+${formatMoney(modifier.price, modifier.currency)}` : 'Included';
+  }
+
+  function modifierHint(list) {
+    if (list.minSelected === list.maxSelected) {
+      return list.minSelected === 1 ? 'Choose 1 (required)' : `Choose ${list.minSelected} (required)`;
+    }
+    if (list.maxSelected > 0) {
+      return list.minSelected > 0
+        ? `Choose ${list.minSelected}-${list.maxSelected} (required)`
+        : `Choose up to ${list.maxSelected} (optional)`;
+    }
+    return list.minSelected > 0 ? `Choose at least ${list.minSelected} (required)` : 'Optional';
+  }
+
+  function renderModifierChoice(list, modifier, listIndex, modifierIndex, useRadio) {
+    const inputId = `modifier-${listIndex}-${modifierIndex}`;
+    const inputType = useRadio ? 'radio' : 'checkbox';
+    const name = `modifier-list-${listIndex}`;
+    const required = useRadio && list.minSelected > 0 ? ' required' : '';
+    const checked = modifier.onByDefault ? ' checked' : '';
+    const quantity = list.allowQuantities
+      ? `<label class="modifier-quantity-label" for="${inputId}-quantity">Qty<span class="visually-hidden"> for ${escapeSquareHtml(modifier.name)}</span></label><input class="modifier-quantity" id="${inputId}-quantity" type="number" min="1" max="${list.maxSelected || 25}" value="1" data-quantity-for="${escapeSquareHtml(modifier.id)}" ${modifier.onByDefault ? '' : 'disabled'} />`
+      : '';
+    return `<div class="item-option-choice${list.allowQuantities ? ' item-option-choice--quantity' : ''}">
+      <input id="${inputId}" type="${inputType}" name="${name}" value="${escapeSquareHtml(modifier.id)}" data-modifier-id="${escapeSquareHtml(modifier.id)}" data-list-id="${escapeSquareHtml(list.id)}"${required}${checked} />
+      <label for="${inputId}"><strong>${escapeSquareHtml(modifier.name)}</strong></label>
+      <small>${modifierPriceLabel(modifier)}</small>
+      ${quantity}
+    </div>`;
+  }
+
+  function selectedItemVariation() {
+    if (!activeCustomItem) return null;
+    const variationId = itemVariationOptions.querySelector('select, input[type="hidden"]')?.value;
+    return activeCustomItem.variations.find((variation) => variation.id === variationId) || null;
+  }
+
+  function selectedItemModifiers() {
+    if (!activeCustomItem) return [];
+    const selected = [];
+    (activeCustomItem.modifierLists || []).forEach((list) => {
+      list.modifiers.forEach((modifier) => {
+        const input = itemModifierOptions.querySelector(`[data-modifier-id="${CSS.escape(modifier.id)}"]`);
+        const automaticallySelected = list.hiddenFromCustomer && modifier.onByDefault;
+        if (!automaticallySelected && !input?.checked) return;
+        const quantityInput = itemModifierOptions.querySelector(`[data-quantity-for="${CSS.escape(modifier.id)}"]`);
+        const quantity = list.allowQuantities && quantityInput ? Number(quantityInput.value) : 1;
+        selected.push({
+          modifierId: modifier.id,
+          listId: list.id,
+          listName: list.name,
+          name: modifier.name,
+          price: modifier.price,
+          currency: modifier.currency,
+          quantity,
+        });
+      });
+    });
+    return selected;
+  }
+
+  function validateItemOptions() {
+    for (const list of activeCustomItem?.modifierLists || []) {
+      const count = selectedItemModifiers()
+        .filter((modifier) => modifier.listId === list.id)
+        .reduce((total, modifier) => total + modifier.quantity, 0);
+      if (!Number.isInteger(count) || count < list.minSelected || (list.maxSelected > 0 && count > list.maxSelected)) {
+        const message = `${list.name}: ${modifierHint(list).replace(/\s*\([^)]*\)/g, '').toLowerCase()}.`;
+        itemOptionsStatus.textContent = message;
+        const firstInput = itemModifierOptions.querySelector(`[data-list-id="${CSS.escape(list.id)}"]`);
+        firstInput?.focus();
+        return false;
+      }
+    }
+    itemOptionsStatus.textContent = '';
+    return true;
+  }
+
+  function updateItemOptionsTotal() {
+    itemModifierOptions.querySelectorAll('[data-modifier-id]').forEach((input) => {
+      const quantityInput = itemModifierOptions.querySelector(`[data-quantity-for="${CSS.escape(input.dataset.modifierId)}"]`);
+      if (quantityInput) quantityInput.disabled = !input.checked;
+    });
+    const variation = selectedItemVariation();
+    const modifiers = selectedItemModifiers();
+    const total = (variation?.price || 0) + modifiers.reduce((sum, modifier) => sum + modifier.price * modifier.quantity, 0);
+    itemOptionsTotal.textContent = formatMoney(total, variation?.currency || 'USD');
+    itemOptionsStatus.textContent = '';
+  }
+
+  function openItemOptions(item, selectedVariationId, trigger) {
+    activeCustomItem = item;
+    activeCustomTrigger = trigger;
+    const hasCustomerOptions = item.variations.length > 1 || (item.modifierLists || []).some((list) => !list.hiddenFromCustomer);
+    itemOptionsEyebrow.textContent = hasCustomerOptions ? 'Customize your order' : 'Menu details';
+    itemOptionsTitle.textContent = item.name;
+    itemOptionsDescription.textContent = item.description || (hasCustomerOptions
+      ? 'Choose your options before adding this item to your cart.'
+      : 'Review the current price, then add this dish to your cart when you are ready.');
+    itemOptionsStatus.textContent = '';
+    if (item.imageUrl) {
+      itemOptionsImage.alt = item.name;
+      itemOptionsImage.src = item.imageUrl;
+      itemOptionsMedia.hidden = false;
+    } else {
+      itemOptionsMedia.hidden = true;
+      itemOptionsImage.removeAttribute('src');
+      itemOptionsImage.alt = '';
+    }
+
+    if (item.variations.length > 1) {
+      itemVariationOptions.innerHTML = `<fieldset class="item-option-group"><legend>Size or style</legend><select class="item-variation-select" aria-label="Choose size or style">${item.variations
+        .map((variation) => `<option value="${escapeSquareHtml(variation.id)}"${variation.id === selectedVariationId ? ' selected' : ''}>${escapeSquareHtml(variation.name)} - ${formatMoney(variation.price, variation.currency)}</option>`)
+        .join('')}</select></fieldset>`;
+    } else {
+      itemVariationOptions.innerHTML = `<input type="hidden" value="${escapeSquareHtml(item.variations[0].id)}" />`;
+    }
+
+    itemModifierOptions.innerHTML = (item.modifierLists || [])
+      .filter((list) => !list.hiddenFromCustomer)
+      .map((list, listIndex) => {
+        const useRadio = list.maxSelected === 1 && !list.allowQuantities;
+        const noThanks = useRadio && list.minSelected === 0
+          ? `<div class="item-option-choice"><input id="modifier-${listIndex}-none" type="radio" name="modifier-list-${listIndex}" value=""${list.modifiers.some((modifier) => modifier.onByDefault) ? '' : ' checked'} /><label for="modifier-${listIndex}-none"><strong>No thanks</strong></label><small>No charge</small></div>`
+          : '';
+        return `<fieldset class="item-option-group" data-option-list="${escapeSquareHtml(list.id)}" data-min-selected="${list.minSelected}">
+          <legend>${escapeSquareHtml(list.name)}</legend>
+          <p class="item-option-group__hint">${modifierHint(list)}</p>
+          <div class="item-option-group__choices">${noThanks}${list.modifiers.map((modifier, modifierIndex) => renderModifierChoice(list, modifier, listIndex, modifierIndex, useRadio)).join('')}</div>
+        </fieldset>`;
+      })
+      .join('');
+    updateItemOptionsTotal();
+    itemOptionsDialog.showModal();
+    (itemOptionsDialog.querySelector('select, input:not([type="hidden"])') || document.getElementById('item-options-submit'))?.focus();
+  }
+
+  function closeItemOptions() {
+    itemOptionsDialog.close();
+    activeCustomTrigger?.focus();
+    activeCustomItem = null;
+    activeCustomTrigger = null;
+  }
+
+  function addConfiguredItem(item, variation, modifiers, button) {
+    cart.addItem({
+      variationId: variation.id,
+      name: item.name,
+      variationName: variation.name,
+      price: variation.price,
+      currency: variation.currency,
+      modifiers,
+      quantity: 1,
+    });
+    pulseCart(item.name, button);
+  }
+
   menuBody.addEventListener('click', (event) => {
+    const details = event.target.closest('.menu-item__details');
+    if (details) {
+      const row = details.closest('.menu-item');
+      const item = liveItems.get(row.dataset.itemId);
+      const variationId = row.querySelector('select, input[type="hidden"]')?.value;
+      const variation = item?.variations.find((entry) => entry.id === variationId);
+      if (item && variation) openItemOptions(item, variation.id, details);
+      return;
+    }
+
     const button = event.target.closest('.add-to-cart');
     if (!button) return;
     const row = button.closest('.menu-item');
@@ -620,22 +934,29 @@ if (menuBody && menuFilters && Array.isArray(menuData)) {
     const variationId = row.querySelector('select, input[type="hidden"]')?.value;
     const variation = item?.variations.find((entry) => entry.id === variationId);
     if (!item || !variation) return;
+    if ((item.modifierLists || []).length) openItemOptions(item, variation.id, button);
+    else addConfiguredItem(item, variation, [], button);
+  });
 
-    cart.addItem({
-      variationId: variation.id,
-      name: item.name,
-      variationName: variation.name,
-      price: variation.price,
-      currency: variation.currency,
-      quantity: 1,
-    });
-    button.textContent = 'Added!';
-    if (cartAnnouncer) cartAnnouncer.textContent = `${item.name} added to your cart.`;
-    cartToggle.classList.remove('has-update');
-    void cartToggle.offsetWidth;
-    cartToggle.classList.add('has-update');
-    setTimeout(() => cartToggle.classList.remove('has-update'), 650);
-    setTimeout(() => (button.textContent = 'Add to cart'), 900);
+  itemModifierOptions.addEventListener('input', updateItemOptionsTotal);
+  itemVariationOptions.addEventListener('input', updateItemOptionsTotal);
+  itemOptionsForm.addEventListener('submit', (event) => {
+    event.preventDefault();
+    if (!activeCustomItem || !validateItemOptions()) return;
+    const variation = selectedItemVariation();
+    if (!variation) return;
+    const item = activeCustomItem;
+    const trigger = activeCustomTrigger;
+    addConfiguredItem(item, variation, selectedItemModifiers(), trigger);
+    closeItemOptions();
+  });
+  itemOptionsClose.addEventListener('click', closeItemOptions);
+  itemOptionsImage.addEventListener('error', () => {
+    itemOptionsMedia.hidden = true;
+    itemOptionsImage.removeAttribute('src');
+  });
+  itemOptionsDialog.addEventListener('click', (event) => {
+    if (event.target === itemOptionsDialog) closeItemOptions();
   });
 
   function openCart() {
@@ -665,34 +986,37 @@ if (menuBody && menuFilters && Array.isArray(menuData)) {
     cartCount.setAttribute('aria-label', itemCountLabel(totalQuantity));
     cartToggleTotal.textContent = formattedTotal;
     cartTotal.textContent = formattedTotal;
-    checkoutTotal.textContent = formattedTotal;
+    if (!checkoutQuote) checkoutTotal.textContent = formattedTotal;
     checkoutCount.textContent = itemCountLabel(totalQuantity);
     cartEmpty.hidden = items.length > 0;
     checkoutButton.disabled = items.length === 0;
 
     cartList.innerHTML = items
-      .map(
-        (item) => `<li class="cart-line" data-variation-id="${escapeSquareHtml(item.variationId)}">
-          <div><strong>${escapeSquareHtml(item.name)}</strong><span>${escapeSquareHtml(item.variationName === 'Regular' ? '' : item.variationName || '')}</span></div>
-          <span class="cart-line__price">${formatMoney(item.price * item.quantity, item.currency)}</span>
+      .map((item) => {
+        const modifierSummary = (item.modifiers || [])
+          .map((modifier) => `${modifier.quantity > 1 ? `${modifier.quantity}x ` : ''}${modifier.name}`)
+          .join(', ');
+        return `<li class="cart-line" data-cart-line-id="${escapeSquareHtml(item.cartLineId)}">
+          <div><strong>${escapeSquareHtml(item.name)}</strong><span>${escapeSquareHtml(item.variationName === 'Regular' ? '' : item.variationName || '')}</span>${modifierSummary ? `<span class="cart-line__mods">${escapeSquareHtml(modifierSummary)}</span>` : ''}</div>
+          <span class="cart-line__price">${formatMoney(cart.unitPrice(item) * item.quantity, item.currency)}</span>
           <div class="quantity-control" aria-label="Quantity for ${escapeSquareHtml(item.name)}">
             <button type="button" data-cart-action="decrease" aria-label="Decrease quantity">−</button><b>${item.quantity}</b><button type="button" data-cart-action="increase" aria-label="Increase quantity">+</button>
           </div>
           <button class="cart-line__remove" type="button" data-cart-action="remove">Remove</button>
-        </li>`
-      )
+        </li>`;
+      })
       .join('');
   }
 
   cartList.addEventListener('click', (event) => {
     const button = event.target.closest('[data-cart-action]');
     if (!button) return;
-    const variationId = button.closest('.cart-line').dataset.variationId;
-    const item = cart.getItems().find((entry) => entry.variationId === variationId);
+    const cartLineId = button.closest('.cart-line').dataset.cartLineId;
+    const item = cart.getItems().find((entry) => entry.cartLineId === cartLineId);
     if (!item) return;
-    if (button.dataset.cartAction === 'increase') cart.updateQuantity(variationId, item.quantity + 1);
-    if (button.dataset.cartAction === 'decrease') cart.updateQuantity(variationId, item.quantity - 1);
-    if (button.dataset.cartAction === 'remove') cart.removeItem(variationId);
+    if (button.dataset.cartAction === 'increase') cart.updateQuantity(cartLineId, item.quantity + 1);
+    if (button.dataset.cartAction === 'decrease') cart.updateQuantity(cartLineId, item.quantity - 1);
+    if (button.dataset.cartAction === 'remove') cart.removeItem(cartLineId);
   });
 
   cartToggle.addEventListener('click', openCart);
@@ -732,6 +1056,7 @@ if (menuBody && menuFilters && Array.isArray(menuData)) {
       givenName,
       familyName,
       email: String(fields.get('email') || '').trim(),
+      phone: String(fields.get('phone') || '').trim(),
       addressLines: [String(fields.get('address') || '').trim()],
       city: String(fields.get('city') || '').trim(),
       state: String(fields.get('state') || '').trim().toUpperCase(),
@@ -740,12 +1065,23 @@ if (menuBody && menuFilters && Array.isArray(menuData)) {
     };
   }
 
-  async function checkoutSignature(contact, items) {
+  function getCustomerNote() {
+    return String(customerNote?.value || '').trim();
+  }
+
+  async function checkoutSignature(contact, items, note) {
     const value = JSON.stringify({
       cart: items
-        .map((item) => ({ variationId: item.variationId, quantity: item.quantity }))
-        .sort((a, b) => a.variationId.localeCompare(b.variationId)),
+        .map((item) => ({
+          variationId: item.variationId,
+          quantity: item.quantity,
+          modifiers: (item.modifiers || [])
+            .map((modifier) => ({ modifierId: modifier.modifierId, quantity: modifier.quantity }))
+            .sort((a, b) => a.modifierId.localeCompare(b.modifierId)),
+        }))
+        .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))),
       contact,
+      customerNote: note,
     });
     const digest = await window.crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
     return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
@@ -755,7 +1091,8 @@ if (menuBody && menuFilters && Array.isArray(menuData)) {
     try {
       const stored = JSON.parse(window.sessionStorage.getItem(CHECKOUT_SESSION_KEY) || 'null');
       const validKey = (value) => typeof value === 'string' && /^[a-zA-Z0-9_-]{8,128}$/.test(value);
-      return stored && typeof stored.signature === 'string' && validKey(stored.orderKey) && validKey(stored.paymentKey)
+      return stored && typeof stored.signature === 'string' && validKey(stored.orderKey) && validKey(stored.paymentKey) &&
+        (stored.tipAmount === null || Number.isSafeInteger(stored.tipAmount))
         ? stored
         : null;
     } catch {
@@ -771,12 +1108,12 @@ if (menuBody && menuFilters && Array.isArray(menuData)) {
     }
   }
 
-  async function ensureCheckoutSession(contact, items) {
-    const signature = await checkoutSignature(contact, items);
+  async function ensureCheckoutSession(contact, items, note) {
+    const signature = await checkoutSignature(contact, items, note);
     const stored = readCheckoutSession();
     const next = stored?.signature === signature
       ? stored
-      : { signature, orderKey: window.crypto.randomUUID(), paymentKey: window.crypto.randomUUID() };
+      : { signature, orderKey: window.crypto.randomUUID(), paymentKey: window.crypto.randomUUID(), tipAmount: null };
 
     if (checkoutSession?.orderKey !== next.orderKey) paymentSourceId = null;
     checkoutSession = next;
@@ -795,6 +1132,9 @@ if (menuBody && menuFilters && Array.isArray(menuData)) {
     checkoutQuote = null;
     checkoutSession = null;
     paymentSourceId = null;
+    selectedTipAmount = 0;
+    checkoutBreakdown.hidden = true;
+    tipOptions.innerHTML = '';
     try {
       window.sessionStorage.removeItem(CHECKOUT_SESSION_KEY);
     } catch {
@@ -802,12 +1142,20 @@ if (menuBody && menuFilters && Array.isArray(menuData)) {
     }
   }
 
-  function checkoutRequestBody(contact, expectedAmount, expectedCurrency) {
+  function checkoutRequestBody(contact, expectedAmount, expectedCurrency, note = getCustomerNote()) {
     const items = cart.getItems();
     return {
       orderIdempotencyKey: checkoutSession.orderKey,
-      cart: items.map((item) => ({ variationId: item.variationId, quantity: item.quantity })),
+      cart: items.map((item) => ({
+        variationId: item.variationId,
+        quantity: item.quantity,
+        modifiers: (item.modifiers || []).map((modifier) => ({
+          modifierId: modifier.modifierId,
+          quantity: modifier.quantity,
+        })),
+      })),
       billingContact: contact,
+      customerNote: note,
       expectedAmount,
       expectedCurrency,
     };
@@ -815,9 +1163,55 @@ if (menuBody && menuFilters && Array.isArray(menuData)) {
 
   function applyCheckoutQuote(quote) {
     if (!quote) return;
-    cart.syncWithCatalog(quote.items || []);
     checkoutQuote = { ...quote, orderKey: checkoutSession?.orderKey };
-    checkoutTotal.textContent = formatMoney(quote.amount, quote.currency);
+    cart.syncWithCatalog(quote.items || []);
+    renderTipOptions(quote);
+    updateCheckoutTotals();
+  }
+
+  function setSelectedTip(amount, userInitiated = false) {
+    const nextAmount = Number(amount);
+    if (!Number.isSafeInteger(nextAmount) || nextAmount < 0) return;
+    if (checkoutSession && checkoutSession.tipAmount !== nextAmount) {
+      const hadPreviousChoice = Number.isSafeInteger(checkoutSession.tipAmount);
+      checkoutSession = {
+        ...checkoutSession,
+        tipAmount: nextAmount,
+        ...(userInitiated && hadPreviousChoice ? { paymentKey: window.crypto.randomUUID() } : {}),
+      };
+      paymentSourceId = null;
+      saveCheckoutSession(checkoutSession);
+    }
+    selectedTipAmount = nextAmount;
+    updateCheckoutTotals();
+  }
+
+  function renderTipOptions(quote) {
+    const options = Array.isArray(quote.tipOptions) ? quote.tipOptions : [];
+    const storedAmount = checkoutSession?.tipAmount;
+    const selected = options.find((option) => option.amount === storedAmount) ||
+      options.find((option) => option.isDefault) || options[0];
+    tipOptions.innerHTML = options.map((option) => {
+      const detail = option.amount ? `<small>${formatMoney(option.amount, option.currency || quote.currency)}</small>` : '';
+      return `<label class="tip-option"><input type="radio" name="tipAmount" value="${option.amount}"${option.amount === selected?.amount ? ' checked' : ''} /><span>${escapeSquareHtml(option.label)}</span>${detail}</label>`;
+    }).join('');
+    setSelectedTip(selected?.amount || 0);
+  }
+
+  function updateCheckoutTotals() {
+    if (!checkoutQuote) return;
+    const { currency, subtotal, tax, discount, taxIncluded } = checkoutQuote;
+    const totalDue = checkoutQuote.amount + selectedTipAmount;
+    checkoutBreakdown.hidden = false;
+    checkoutSubtotal.textContent = formatMoney(subtotal, currency);
+    checkoutTaxLabel.textContent = taxIncluded ? 'Sales tax (included)' : 'Sales tax';
+    checkoutTax.textContent = formatMoney(tax, currency);
+    checkoutDiscountRow.hidden = !discount;
+    checkoutDiscount.textContent = `−${formatMoney(discount, currency)}`;
+    checkoutTip.textContent = formatMoney(selectedTipAmount, currency);
+    checkoutGrandTotal.textContent = formatMoney(totalDue, currency);
+    checkoutTotal.textContent = formatMoney(totalDue, currency);
+    paymentSubmitLabel.textContent = `Pay ${formatMoney(totalDue, currency)} securely`;
   }
 
   async function initializeCard() {
@@ -852,6 +1246,7 @@ if (menuBody && menuFilters && Array.isArray(menuData)) {
     closeCart();
     checkoutDialog.showModal();
     showBillingStep();
+    if (!checkoutQuote) checkoutBreakdown.hidden = true;
     document.getElementById('billing-full-name')?.focus();
   });
 
@@ -860,6 +1255,11 @@ if (menuBody && menuFilters && Array.isArray(menuData)) {
 
     const requiredFields = billingContactForm.querySelectorAll('input[required]');
     requiredFields.forEach((field) => field.setCustomValidity(field.value.trim() ? '' : 'This field is required.'));
+    const phoneField = document.getElementById('billing-phone');
+    const phoneDigits = phoneField.value.replace(/\D/g, '');
+    if (phoneDigits.length !== 10 && !(phoneDigits.length === 11 && phoneDigits.startsWith('1'))) {
+      phoneField.setCustomValidity('Enter a valid 10-digit US phone number.');
+    }
     if (!billingContactForm.reportValidity()) return;
     if (!cart.getItems().length) return;
 
@@ -873,14 +1273,15 @@ if (menuBody && menuFilters && Array.isArray(menuData)) {
     try {
       const contact = getBillingContact();
       const items = cart.getItems();
-      const session = await ensureCheckoutSession(contact, items);
+      const note = getCustomerNote();
+      const session = await ensureCheckoutSession(contact, items, note);
       const confirmedQuote = checkoutQuote?.orderKey === session.orderKey ? checkoutQuote : null;
       const expectedAmount = confirmedQuote?.amount ?? cart.calculateTotal();
       const expectedCurrency = confirmedQuote?.currency || items[0]?.currency || 'USD';
       const result = await fetchJson('/api/checkout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(checkoutRequestBody(contact, expectedAmount, expectedCurrency)),
+        body: JSON.stringify(checkoutRequestBody(contact, expectedAmount, expectedCurrency, note)),
       });
 
       applyCheckoutQuote(result.checkout);
@@ -904,10 +1305,19 @@ if (menuBody && menuFilters && Array.isArray(menuData)) {
 
   billingContactForm.addEventListener('input', (event) => {
     event.target.setCustomValidity('');
+    if (event.target === customerNote && customerNoteCount) customerNoteCount.textContent = `${customerNote.value.length}/500`;
     checkoutQuote = null;
     checkoutSession = null;
     paymentSourceId = null;
+    selectedTipAmount = 0;
+    checkoutBreakdown.hidden = true;
+    tipOptions.innerHTML = '';
+    const items = cart.getItems();
+    checkoutTotal.textContent = formatMoney(cart.calculateTotal(), items[0]?.currency || 'USD');
     checkoutContinueLabel.textContent = 'Continue to payment';
+  });
+  tipOptions.addEventListener('change', (event) => {
+    if (event.target.matches('input[name="tipAmount"]')) setSelectedTip(Number(event.target.value), true);
   });
   billingBack.addEventListener('click', () => {
     showBillingStep();
@@ -939,7 +1349,7 @@ if (menuBody && menuFilters && Array.isArray(menuData)) {
       const contact = getBillingContact();
       if (!paymentSourceId) {
         const tokenResult = await card.tokenize({
-          amount: (checkoutQuote.amount / 100).toFixed(2),
+          amount: ((checkoutQuote.amount + selectedTipAmount) / 100).toFixed(2),
           currencyCode: checkoutQuote.currency || config.currency,
           intent: 'CHARGE',
           customerInitiated: true,
@@ -961,6 +1371,7 @@ if (menuBody && menuFilters && Array.isArray(menuData)) {
           ...checkoutRequestBody(contact, checkoutQuote.amount, checkoutQuote.currency),
           paymentIdempotencyKey: checkoutSession.paymentKey,
           sourceId: paymentSourceId,
+          tipAmount: selectedTipAmount,
         }),
       });
 
@@ -968,6 +1379,7 @@ if (menuBody && menuFilters && Array.isArray(menuData)) {
       cart.clear();
       paymentStep.hidden = true;
       billingContactForm.reset();
+      if (customerNoteCount) customerNoteCount.textContent = '0/500';
       clearCheckoutSession();
       paymentStatus.className = 'payment-status is-success';
       paymentStatus.textContent = `Payment successful — ${formatMoney(result.payment.amount, result.payment.currency)} paid.`;
@@ -994,7 +1406,8 @@ if (menuBody && menuFilters && Array.isArray(menuData)) {
       console.error('[Square] Payment failed:', error.message);
       paymentSubmit.disabled = false;
     } finally {
-      paymentSubmitLabel.textContent = 'Pay securely';
+      if (checkoutQuote) updateCheckoutTotals();
+      else paymentSubmitLabel.textContent = 'Pay securely';
     }
   });
 

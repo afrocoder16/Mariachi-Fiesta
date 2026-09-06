@@ -20,6 +20,40 @@ loadEnv(path.join(ROOT, '.env'));
 const { SquareApiError, createCheckoutRequest, createPaymentRequest, fetchMenuItems, getPublicConfig } = require('./square-config');
 const configuredPort = Number(process.env.PORT);
 const port = Number.isInteger(configuredPort) && configuredPort >= 0 ? configuredPort : 3000;
+const squareEnvironment = getPublicConfig().environment;
+const squareWebOrigin = squareEnvironment === 'production'
+  ? 'https://web.squarecdn.com'
+  : 'https://sandbox.web.squarecdn.com';
+const squarePciOrigin = squareEnvironment === 'production'
+  ? 'https://pci-connect.squareup.com'
+  : 'https://pci-connect.squareupsandbox.com';
+// Hash of the Restaurant JSON-LD block in index.html. The security test keeps
+// this value synchronized if that structured data changes.
+const structuredDataHash = "'sha256-CPNOCjQfz5veTz4vHsllIUuYo/bBQIuQTr4C2A0vfVI='";
+const contentSecurityPolicy = [
+  "default-src 'self'",
+  "base-uri 'self'",
+  "object-src 'none'",
+  "frame-ancestors 'none'",
+  "form-action 'self'",
+  `script-src 'self' ${structuredDataHash} ${squareWebOrigin}`,
+  `style-src 'self' 'unsafe-inline' https://fonts.googleapis.com ${squareWebOrigin}`,
+  "font-src 'self' data: https://fonts.gstatic.com https://square-fonts-production-f.squarecdn.com https://d1g145x70srn7h.cloudfront.net",
+  "img-src 'self' data: https:",
+  `frame-src 'self' https://maps.google.com https://www.google.com ${squareWebOrigin}`,
+  `connect-src 'self' https://places.googleapis.com ${squareWebOrigin} ${squarePciOrigin} https://o160250.ingest.sentry.io`,
+  "media-src 'self'",
+  "worker-src 'self'",
+].join('; ');
+const securityHeaders = Object.freeze({
+  'Content-Security-Policy': contentSecurityPolicy,
+  'X-Content-Type-Options': 'nosniff',
+  'Referrer-Policy': 'strict-origin-when-cross-origin',
+  'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
+  'X-Frame-Options': 'DENY',
+  'X-Permitted-Cross-Domain-Policies': 'none',
+  ...(squareEnvironment === 'production' ? { 'Strict-Transport-Security': 'max-age=31536000' } : {}),
+});
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const RATE_LIMIT_MAX = 10;
 const rateLimitedPaths = new Set(['/api/menu', '/api/checkout', '/api/payments']);
@@ -47,12 +81,22 @@ const contentTypes = {
 
 function sendJson(response, status, payload, extraHeaders = {}) {
   response.writeHead(status, {
+    ...securityHeaders,
     'Content-Type': 'application/json; charset=utf-8',
     'Cache-Control': 'no-store',
-    'X-Content-Type-Options': 'nosniff',
     ...extraHeaders,
   });
   response.end(JSON.stringify(payload));
+}
+
+function sendText(response, status, message, extraHeaders = {}) {
+  response.writeHead(status, {
+    ...securityHeaders,
+    'Content-Type': 'text/plain; charset=utf-8',
+    'Cache-Control': 'no-store',
+    ...extraHeaders,
+  });
+  response.end(message);
 }
 
 function getClientIp(request) {
@@ -111,38 +155,41 @@ async function readJson(request) {
   }
 }
 
+function requireJsonContentType(request) {
+  const contentType = String(request.headers['content-type'] || '').split(';', 1)[0].trim().toLowerCase();
+  if (contentType !== 'application/json') {
+    throw new SquareApiError('Content-Type must be application/json.', 415);
+  }
+}
+
 function serveStatic(requestPath, response, method = 'GET') {
   const relativePath = requestPath === '/' ? 'index.html' : decodeURIComponent(requestPath.slice(1));
   const allowed = publicFiles.has(relativePath) || relativePath.startsWith('images/');
   if (!allowed || relativePath.includes('..')) {
-    response.writeHead(404);
-    response.end('Not found');
-    return;
+    return sendText(response, 404, 'Not found');
   }
 
   const filePath = path.join(ROOT, relativePath);
   fs.readFile(filePath, (error, contents) => {
     if (error) {
-      response.writeHead(error.code === 'ENOENT' ? 404 : 500);
-      response.end(error.code === 'ENOENT' ? 'Not found' : 'Server error');
-      return;
+      return sendText(response, error.code === 'ENOENT' ? 404 : 500, error.code === 'ENOENT' ? 'Not found' : 'Server error');
     }
     response.writeHead(200, {
+      ...securityHeaders,
       'Content-Type': contentTypes[path.extname(filePath).toLowerCase()] || 'application/octet-stream',
       'Cache-Control': relativePath.endsWith('.html') ? 'no-cache' : 'public, max-age=3600',
-      'X-Content-Type-Options': 'nosniff',
-      'Referrer-Policy': 'strict-origin-when-cross-origin',
-      'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
-      'X-Frame-Options': 'DENY',
     });
     response.end(method === 'HEAD' ? undefined : contents);
   });
 }
 
 const server = http.createServer(async (request, response) => {
-  const url = new URL(request.url, `http://${request.headers.host || 'localhost'}`);
+  let url;
 
   try {
+    // request.url is path-relative; a fixed base prevents a malformed Host
+    // header from becoming an input to URL parsing.
+    url = new URL(request.url || '/', 'http://localhost');
     let rateLimitHeaders = {};
     if (rateLimitedPaths.has(url.pathname)) {
       const rateLimit = checkRateLimit(request, url.pathname);
@@ -162,10 +209,12 @@ const server = http.createServer(async (request, response) => {
       return sendJson(response, 200, { categories: await fetchMenuItems() }, rateLimitHeaders);
     }
     if (request.method === 'POST' && url.pathname === '/api/checkout') {
+      requireJsonContentType(request);
       const checkout = await createCheckoutRequest(await readJson(request));
       return sendJson(response, 200, { checkout }, rateLimitHeaders);
     }
     if (request.method === 'POST' && url.pathname === '/api/payments') {
+      requireJsonContentType(request);
       const result = await createPaymentRequest(await readJson(request));
       return sendJson(response, 200, { payment: result }, rateLimitHeaders);
     }
@@ -173,21 +222,24 @@ const server = http.createServer(async (request, response) => {
       return sendJson(response, 404, { error: 'API route not found.' });
     }
     if (request.method !== 'GET' && request.method !== 'HEAD') {
-      response.writeHead(405, { Allow: 'GET, HEAD' });
-      return response.end('Method not allowed');
+      return sendText(response, 405, 'Method not allowed', { Allow: 'GET, HEAD' });
     }
     return serveStatic(url.pathname, response, request.method);
   } catch (error) {
     const status = error instanceof SquareApiError ? error.status : 500;
-    console.error(`[Server] ${request.method} ${url.pathname}:`, error.message);
+    console.error(`[Server] ${request.method} ${url?.pathname || '[invalid request]'}:`, error.message);
     return sendJson(response, status >= 400 && status < 600 ? status : 500, {
-      error: status === 500 ? 'Square is temporarily unavailable. Please try again.' : error.message,
+      error: status >= 500 ? 'Square is temporarily unavailable. Please try again.' : error.message,
       ...(error.code ? { code: error.code } : {}),
       ...(error.data && typeof error.data === 'object' ? error.data : {}),
       ...(process.env.NODE_ENV === 'development' && error.details?.length ? { details: error.details } : {}),
     });
   }
 });
+
+server.requestTimeout = 30_000;
+server.headersTimeout = 15_000;
+server.keepAliveTimeout = 5_000;
 
 server.listen(port, () => {
   const address = server.address();

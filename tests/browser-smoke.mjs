@@ -83,6 +83,25 @@ const stickyHeader = await evaluate(`(() => {
 assert.deepEqual(stickyHeader, { top: 0, compact: true });
 
 await evaluate("document.querySelector('.add-to-cart').click()");
+await waitFor("document.querySelector('#cart-count').textContent === '1' || document.querySelector('#item-options-dialog').open");
+const customizationOpened = await evaluate("document.querySelector('#item-options-dialog').open");
+if (customizationOpened) {
+  await evaluate(`(() => {
+    document.querySelectorAll('#item-modifier-options .item-option-group').forEach((group) => {
+      const minimum = Number(group.dataset.minSelected || 0);
+      const inputs = Array.from(group.querySelectorAll('input[data-modifier-id]'));
+      let selected = inputs.filter((input) => input.checked).length;
+      for (const input of inputs) {
+        if (selected >= minimum) break;
+        if (!input.checked) {
+          input.click();
+          selected += 1;
+        }
+      }
+    });
+    document.querySelector('#item-options-form').requestSubmit();
+  })()`);
+}
 await waitFor("document.querySelector('#cart-count').textContent === '1'");
 await evaluate("document.querySelector('#cart-toggle').click()");
 
@@ -106,6 +125,7 @@ await evaluate(`(() => {
   const values = {
     'billing-full-name': 'Test Customer',
     'billing-email': 'test@example.com',
+    'billing-phone': '(507) 555-0123',
     'billing-address': '123 Main Street',
     'billing-city': 'Marshall',
     'billing-state': 'MN',
@@ -133,11 +153,25 @@ const paymentStep = await evaluate(`(() => ({
   cardMounted: document.querySelector('#card-container').childElementCount > 0,
   payEnabled: !document.querySelector('#payment-submit').disabled,
   checkoutSessionPersisted: (() => {
-    const session = JSON.parse(sessionStorage.getItem('mariachi-fiesta-checkout-v1') || 'null');
-    return Boolean(session?.orderKey && session?.paymentKey && session?.signature);
-  })()
+    const session = JSON.parse(sessionStorage.getItem('mariachi-fiesta-checkout-v2') || 'null');
+    return Boolean(session?.orderKey && session?.paymentKey && session?.signature && Number.isInteger(session?.tipAmount));
+  })(),
+  tipChoices: document.querySelectorAll('#tip-options input[name="tipAmount"]').length,
+  tipSelected: Boolean(document.querySelector('#tip-options input[name="tipAmount"]:checked')),
+  taxShown: !document.querySelector('#checkout-breakdown').hidden && document.querySelector('#checkout-tax').textContent !== '',
+  squareBranded: document.querySelector('.square-trust strong')?.textContent === 'Square'
 }))()`);
-assert.deepEqual(paymentStep, { billingHidden: true, paymentVisible: true, cardMounted: true, payEnabled: true, checkoutSessionPersisted: true });
+assert.deepEqual(paymentStep, {
+  billingHidden: true,
+  paymentVisible: true,
+  cardMounted: true,
+  payEnabled: true,
+  checkoutSessionPersisted: true,
+  tipChoices: 4,
+  tipSelected: true,
+  taxShown: true,
+  squareBranded: true,
+});
 
 await evaluate("document.querySelector('#checkout-close').click(); document.querySelector('.site-footer').scrollIntoView({ block: 'end' })");
 await new Promise((resolve) => setTimeout(resolve, 500));
