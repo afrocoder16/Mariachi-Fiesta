@@ -408,6 +408,7 @@ if (menuBody && menuFilters && Array.isArray(menuData)) {
   const cartTotal = document.getElementById('cart-total');
   const checkoutButton = document.getElementById('checkout-button');
   const menuCartButton = document.getElementById('menu-cart-button');
+  const weeklyPromoCartButton = document.getElementById('weekly-promo-cart-button');
   const cartAnnouncer = document.getElementById('cart-announcer');
   const checkoutDialog = document.getElementById('checkout-dialog');
   const checkoutClose = document.getElementById('checkout-close');
@@ -525,6 +526,13 @@ if (menuBody && menuFilters && Array.isArray(menuData)) {
       liveItems.set(item.id, item);
       item.variations.forEach((variation) => liveVariations.set(variation.id, { item, variation }));
     }));
+
+    if (weeklyPromoCartButton) {
+      const featuredName = weeklyPromoCartButton.dataset.menuItemName?.trim().toLowerCase();
+      const featuredItem = Array.from(liveItems.values()).find((item) => item.name.trim().toLowerCase() === featuredName);
+      weeklyPromoCartButton.disabled = !featuredItem;
+      weeklyPromoCartButton.title = featuredItem ? '' : 'This item is not currently available to order online.';
+    }
 
     const refreshedCart = cart.getItems().map((saved) => {
       const catalogEntry = liveVariations.get(saved.variationId);
@@ -745,10 +753,11 @@ if (menuBody && menuFilters && Array.isArray(menuData)) {
 
   function pulseCart(itemName, button) {
     if (button) {
-      const original = button.dataset.originalLabel || button.textContent;
-      button.dataset.originalLabel = original;
-      button.textContent = 'Added!';
-      setTimeout(() => (button.textContent = original), 900);
+      const label = button.querySelector('[data-button-label]') || button;
+      const original = label.dataset.originalLabel || label.textContent;
+      label.dataset.originalLabel = original;
+      label.textContent = 'Added!';
+      setTimeout(() => (label.textContent = original), 900);
     }
     if (cartAnnouncer) cartAnnouncer.textContent = `${itemName} added to your cart.`;
     cartToggle.classList.remove('has-update');
@@ -936,6 +945,18 @@ if (menuBody && menuFilters && Array.isArray(menuData)) {
     if (!item || !variation) return;
     if ((item.modifierLists || []).length) openItemOptions(item, variation.id, button);
     else addConfiguredItem(item, variation, [], button);
+  });
+
+  weeklyPromoCartButton?.addEventListener('click', () => {
+    const featuredName = weeklyPromoCartButton.dataset.menuItemName?.trim().toLowerCase();
+    const item = Array.from(liveItems.values()).find((entry) => entry.name.trim().toLowerCase() === featuredName);
+    const variation = item?.variations[0];
+    if (!item || !variation) return;
+    if (item.variations.length > 1 || (item.modifierLists || []).length) {
+      openItemOptions(item, variation.id, weeklyPromoCartButton);
+    } else {
+      addConfiguredItem(item, variation, [], weeklyPromoCartButton);
+    }
   });
 
   itemModifierOptions.addEventListener('input', updateItemOptionsTotal);

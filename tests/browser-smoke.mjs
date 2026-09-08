@@ -62,12 +62,16 @@ const initial = await evaluate(`(() => ({
   logoLoaded: document.querySelector('.brand-logo')?.complete && document.querySelector('.brand-logo')?.naturalWidth > 0,
   menuItems: document.querySelectorAll('.menu-item').length,
   menuError: Boolean(document.querySelector('.menu-load-error')),
+  featuredCartLabel: document.querySelector('#weekly-promo-cart-button [data-button-label]')?.textContent.trim(),
+  featuredCartEnabled: !document.querySelector('#weekly-promo-cart-button')?.disabled,
   paymentInitiallyHidden: document.querySelector('#payment-step').hidden,
   billingInitiallyVisible: !document.querySelector('#billing-step').hidden
 }))()`);
 assert.equal(initial.title, 'Mariachi Fiesta | Marshall, Minnesota');
 assert.equal(initial.logoLoaded, true);
 assert.equal(initial.menuError, false);
+assert.equal(initial.featuredCartLabel, 'Add to cart');
+assert.equal(initial.featuredCartEnabled, true);
 assert.equal(initial.paymentInitiallyHidden, true);
 assert.equal(initial.billingInitiallyVisible, true);
 
@@ -82,10 +86,11 @@ const stickyHeader = await evaluate(`(() => {
 })()`);
 assert.deepEqual(stickyHeader, { top: 0, compact: true });
 
-await evaluate("document.querySelector('.add-to-cart').click()");
+await evaluate("document.querySelector('#weekly-promo-cart-button').click()");
 await waitFor("document.querySelector('#cart-count').textContent === '1' || document.querySelector('#item-options-dialog').open");
 const customizationOpened = await evaluate("document.querySelector('#item-options-dialog').open");
 if (customizationOpened) {
+  assert.equal(await evaluate("document.querySelector('#item-options-title').textContent.trim()"), 'Molcajete');
   await evaluate(`(() => {
     document.querySelectorAll('#item-modifier-options .item-option-group').forEach((group) => {
       const minimum = Number(group.dataset.minSelected || 0);
@@ -109,9 +114,10 @@ const cart = await evaluate(`(() => ({
   open: document.querySelector('#cart-drawer').getAttribute('aria-hidden') === 'false',
   focusable: !document.querySelector('#cart-drawer').inert,
   checkoutEnabled: !document.querySelector('#checkout-button').disabled,
-  lineCount: document.querySelectorAll('.cart-line').length
+  lineCount: document.querySelectorAll('.cart-line').length,
+  lineName: document.querySelector('.cart-line strong')?.textContent.trim()
 }))()`);
-assert.deepEqual(cart, { open: true, focusable: true, checkoutEnabled: true, lineCount: 1 });
+assert.deepEqual(cart, { open: true, focusable: true, checkoutEnabled: true, lineCount: 1, lineName: 'Molcajete' });
 
 await evaluate("document.querySelector('#checkout-button').click()");
 const firstStep = await evaluate(`(() => ({
