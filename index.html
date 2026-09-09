@@ -2,6 +2,8 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; object-src 'none'; form-action 'self'; script-src 'self' 'sha256-CPNOCjQfz5veTz4vHsllIUuYo/bBQIuQTr4C2A0vfVI=' https://web.squarecdn.com https://sandbox.web.squarecdn.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://web.squarecdn.com https://sandbox.web.squarecdn.com; font-src 'self' data: https://fonts.gstatic.com https://square-fonts-production-f.squarecdn.com https://d1g145x70srn7h.cloudfront.net; img-src 'self' data: https:; frame-src 'self' https://maps.google.com https://www.google.com https://web.squarecdn.com https://sandbox.web.squarecdn.com; connect-src 'self' https://places.googleapis.com https://web.squarecdn.com https://sandbox.web.squarecdn.com https://pci-connect.squareup.com https://pci-connect.squareupsandbox.com https://o160250.ingest.sentry.io; media-src 'self'; worker-src 'self'" />
+    <meta name="referrer" content="strict-origin-when-cross-origin" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="Mariachi Fiesta serves Mexican favorites, house salsa, and margaritas at 329 W Main St in Marshall, Minnesota—serving the community since 2001." />
     <meta name="theme-color" content="#b94427" />
@@ -426,7 +428,7 @@
 
       <section class="checkout-step" id="billing-step" aria-labelledby="billing-title">
         <h3 id="billing-title">Billing contact</h3>
-        <p>Enter your contact and billing details. Your name, email, and phone are saved with the order in Square for pickup support&mdash;this does not sign you up for marketing.</p>
+        <p>Enter your contact and billing details. Your name, email, and phone are attached to the order in Square for pickup support&mdash;this does not sign you up for marketing.</p>
         <form id="billing-contact-form">
           <div class="billing-fields">
             <label class="billing-field billing-field--wide">

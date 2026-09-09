@@ -1144,7 +1144,12 @@ if (menuBody && menuFilters && Array.isArray(menuData)) {
 
   function rotatePaymentAttempt() {
     if (!checkoutSession) return;
-    checkoutSession = { ...checkoutSession, paymentKey: window.crypto.randomUUID() };
+    checkoutSession = {
+      ...checkoutSession,
+      orderKey: window.crypto.randomUUID(),
+      paymentKey: window.crypto.randomUUID(),
+    };
+    if (checkoutQuote) checkoutQuote = { ...checkoutQuote, orderKey: checkoutSession.orderKey };
     paymentSourceId = null;
     saveCheckoutSession(checkoutSession);
   }

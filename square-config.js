@@ -462,44 +462,7 @@ function checkoutSummary(order, lines) {
   };
 }
 
-async function searchCustomers(filter) {
-  const payload = await squareRequest('/customers/search', {
-    method: 'POST',
-    body: JSON.stringify({ query: { filter }, limit: 10 }),
-  });
-  return payload.customers || [];
-}
-
-async function createOrReuseCustomer(contact, checkoutKey) {
-  const [emailMatches, phoneMatches] = await Promise.all([
-    searchCustomers({ email_address: { exact: contact.email } }),
-    searchCustomers({ phone_number: { exact: contact.phone } }),
-  ]);
-  const phoneIds = new Set(phoneMatches.map((customer) => customer.id));
-  const matchingBoth = emailMatches.find((customer) => phoneIds.has(customer.id));
-  const customerFields = {
-    given_name: contact.givenName,
-    family_name: contact.familyName,
-    email_address: contact.email,
-    phone_number: contact.phone,
-  };
-  // Checkout contact fields are not authenticated account changes. Reuse a
-  // profile only when both exact identifiers match, and never overwrite an
-  // existing Square customer's details from this public form.
-  if (matchingBoth) return matchingBoth;
-
-  const payload = await squareRequest('/customers', {
-    method: 'POST',
-    body: JSON.stringify({
-      idempotency_key: squareIdempotencyKey(checkoutKey, '-customer'),
-      ...customerFields,
-    }),
-  });
-  if (!payload.customer?.id) throw new SquareApiError('Square did not return a valid customer profile.', 502);
-  return payload.customer;
-}
-
-async function createSquareOrder(request = {}) {
+async function prepareSquareOrderRequest(request = {}) {
   const { orderIdempotencyKey, idempotencyKey, cart, billingContact, customerNote, expectedAmount, expectedCurrency } = request || {};
   const checkoutKey = validateIdempotencyKey(orderIdempotencyKey || idempotencyKey);
   const contact = validateBillingContact(billingContact);
@@ -509,49 +472,45 @@ async function createSquareOrder(request = {}) {
   // Confirm availability, then let Square calculate the authoritative order total.
   const menu = await fetchMenuItems();
   const { lines } = validateCart(cart, menu);
-  const orderPayload = await squareRequest('/orders', {
-    method: 'POST',
-    body: JSON.stringify({
-      idempotency_key: squareIdempotencyKey(checkoutKey, '-order'),
-      order: {
-        location_id: locationId,
-        reference_id: checkoutKey.slice(0, 40),
-        source: { name: 'Mariachi Fiesta Website' },
-        line_items: lines.map((line) => ({
-          catalog_object_id: line.variationId,
-          quantity: String(line.quantity),
-          ...(line.modifiers.length ? {
-            modifiers: line.modifiers.map((modifier) => ({
-              catalog_object_id: modifier.modifierId,
-              quantity: String(modifier.quantity),
-            })),
-          } : {}),
+  const order = {
+    location_id: locationId,
+    reference_id: checkoutKey.slice(0, 40),
+    source: { name: 'Mariachi Fiesta Website' },
+    line_items: lines.map((line) => ({
+      catalog_object_id: line.variationId,
+      quantity: String(line.quantity),
+      ...(line.modifiers.length ? {
+        modifiers: line.modifiers.map((modifier) => ({
+          catalog_object_id: modifier.modifierId,
+          quantity: String(modifier.quantity),
         })),
-        pricing_options: {
-          auto_apply_discounts: true,
-          auto_apply_taxes: true,
-        },
-        fulfillments: [
-          {
-            type: 'PICKUP',
-            state: 'PROPOSED',
-            pickup_details: {
-              schedule_type: 'ASAP',
-              recipient: {
-                display_name: contact.displayName,
-                email_address: contact.email,
-                phone_number: contact.phone,
-              },
-              note: pickupNote || 'Pickup order placed on the Mariachi Fiesta website.',
-            },
+      } : {}),
+    })),
+    pricing_options: {
+      auto_apply_discounts: true,
+      auto_apply_taxes: true,
+    },
+    fulfillments: [
+      {
+        type: 'PICKUP',
+        state: 'PROPOSED',
+        pickup_details: {
+          schedule_type: 'ASAP',
+          recipient: {
+            display_name: contact.displayName,
+            email_address: contact.email,
+            phone_number: contact.phone,
           },
-        ],
+          note: pickupNote || 'Pickup order placed on the Mariachi Fiesta website.',
+        },
       },
-    }),
-  });
+    ],
+  };
+  return { checkoutKey, contact, expected, lines, order };
+}
 
-  const order = orderPayload.order;
-  if (!order?.id || order.location_id !== locationId) {
+function verifySquareOrder(order, lines, expected, requireId) {
+  if (!order || (requireId && !order.id) || order.location_id !== locationId) {
     throw new SquareApiError('Square did not return a valid order.', 502);
   }
 
@@ -565,27 +524,83 @@ async function createSquareOrder(request = {}) {
       { checkout }
     );
   }
-
-  return { checkoutKey, contact, order, checkout };
+  return checkout;
 }
 
-/** Creates or retrieves an idempotent Square order for customer confirmation. */
+async function calculateSquareOrder(request = {}) {
+  const prepared = await prepareSquareOrderRequest(request);
+  const payload = await squareRequest('/orders/calculate', {
+    method: 'POST',
+    body: JSON.stringify({ order: prepared.order }),
+  });
+  return verifySquareOrder(payload.order, prepared.lines, prepared.expected, false);
+}
+
+async function createSquareOrder(request = {}) {
+  const prepared = await prepareSquareOrderRequest(request);
+  const payload = await squareRequest('/orders', {
+    method: 'POST',
+    body: JSON.stringify({
+      idempotency_key: squareIdempotencyKey(prepared.checkoutKey, '-order'),
+      order: prepared.order,
+    }),
+  });
+  const checkout = verifySquareOrder(payload.order, prepared.lines, prepared.expected, true);
+  return { ...prepared, order: payload.order, checkout };
+}
+
+async function cancelUnpaidOrder(order, checkoutKey) {
+  if (!order?.id || !Number.isInteger(order.version)) return;
+  let currentOrder = order;
+  const openFulfillments = (currentOrder.fulfillments || [])
+    .filter((fulfillment) => fulfillment?.uid && !['CANCELED', 'COMPLETED', 'FAILED'].includes(fulfillment.state))
+    .map((fulfillment) => ({ uid: fulfillment.uid, state: 'CANCELED' }));
+
+  if (openFulfillments.length) {
+    const fulfillmentPayload = await squareRequest(`/orders/${encodeURIComponent(order.id)}`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        idempotency_key: squareIdempotencyKey(checkoutKey, '-cancel-fulfillment'),
+        order: {
+          location_id: locationId,
+          version: currentOrder.version,
+          fulfillments: openFulfillments,
+        },
+      }),
+    });
+    currentOrder = fulfillmentPayload.order || currentOrder;
+  }
+
+  await squareRequest(`/orders/${encodeURIComponent(order.id)}`, {
+    method: 'PUT',
+    body: JSON.stringify({
+      idempotency_key: squareIdempotencyKey(checkoutKey, '-cancel-order'),
+      order: {
+        location_id: locationId,
+        version: currentOrder.version,
+        state: 'CANCELED',
+      },
+    }),
+  });
+}
+
+/** Calculates a checkout quote without creating a persistent Square order. */
 async function createCheckoutRequest(request = {}) {
-  const { checkout } = await createSquareOrder(request);
-  return checkout;
+  return calculateSquareOrder(request);
 }
 
 /** Revalidates the checkout, creates the Square order, and links its payment. */
 async function createPaymentRequest(request = {}) {
   const { sourceId, paymentIdempotencyKey, tipAmount } = request || {};
-  if (typeof sourceId !== 'string' || !sourceId || sourceId.length > 500) {
+  if (typeof sourceId !== 'string' || !/^cnon:[a-zA-Z0-9_-]{8,495}$/.test(sourceId)) {
     throw new SquareApiError('A valid payment token is required.', 400);
   }
   const paymentKey = validateIdempotencyKey(paymentIdempotencyKey);
+  // Reject malformed tip attempts before creating any persistent Square data.
+  validateTipAmount(tipAmount, validateExpectedTotal(request.expectedAmount, request.expectedCurrency));
 
   const { checkoutKey, contact, order, checkout } = await createSquareOrder(request);
   const validatedTip = validateTipAmount(tipAmount, checkout);
-  const customer = await createOrReuseCustomer(contact, checkoutKey);
   let payload;
   try {
     payload = await squareRequest('/payments', {
@@ -597,7 +612,6 @@ async function createPaymentRequest(request = {}) {
         ...(validatedTip ? { tip_money: { amount: validatedTip, currency: checkout.currency } } : {}),
         location_id: locationId,
         order_id: order.id,
-        customer_id: customer.id,
         buyer_email_address: contact.email,
         autocomplete: true,
         note: `Website pickup for ${contact.displayName}`.slice(0, 500),
@@ -606,6 +620,11 @@ async function createPaymentRequest(request = {}) {
   } catch (error) {
     if (error instanceof SquareApiError && error.status >= 400 && error.status < 500) {
       error.code = error.code || 'PAYMENT_RETRY_ALLOWED';
+      try {
+        await cancelUnpaidOrder(order, checkoutKey);
+      } catch (cleanupError) {
+        console.error(`[Square] Could not cancel unpaid order ${order.id}:`, cleanupError.message);
+      }
     }
     throw error;
   }
@@ -636,7 +655,7 @@ async function createPaymentRequest(request = {}) {
     orderAmount: paymentAmount,
     tipAmount: paymentTip,
     currency: payment.amount_money?.currency || checkout.currency,
-    customerId: payment.customer_id || customer.id,
+    customerId: payment.customer_id || null,
   };
 }
 

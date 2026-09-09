@@ -1,0 +1,9 @@
+exclude:
+  - .env.example
+  - README.md
+  - package.json
+  - package-lock.json
+  - server.js
+  - square-config.js
+  - tests
+  - archive

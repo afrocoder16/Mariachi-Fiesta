@@ -65,6 +65,8 @@ const squareOrder = {
   id: 'ORDER_123',
   location_id: 'TEST_LOCATION',
   version: 1,
+  state: 'OPEN',
+  fulfillments: [{ uid: 'FULFILLMENT_123', type: 'PICKUP', state: 'PROPOSED' }],
   total_money: { amount: 1087, currency: 'USD' },
   total_tax_money: { amount: 87, currency: 'USD' },
   total_discount_money: { amount: 0, currency: 'USD' },
@@ -100,26 +102,28 @@ function squareResponse(status, body) {
   };
 }
 
-function installSquareMock(calls, customerMatches = {}) {
+function installSquareMock(calls, overrides = {}) {
   global.fetch = async (url, options = {}) => {
     calls.push({ url: String(url), options });
     if (String(url).includes('/catalog/list')) return squareResponse(200, catalog);
+    if (String(url).endsWith('/orders/calculate')) {
+      const calculatedOrder = { ...squareOrder };
+      delete calculatedOrder.id;
+      return squareResponse(200, { order: calculatedOrder });
+    }
+    if (String(url).includes('/orders/ORDER_123') && options.method === 'PUT') {
+      const update = JSON.parse(options.body);
+      const nextOrder = {
+        ...squareOrder,
+        version: update.order.fulfillments ? 2 : 3,
+        state: update.order.state || squareOrder.state,
+        fulfillments: update.order.fulfillments || squareOrder.fulfillments,
+      };
+      return squareResponse(200, { order: nextOrder });
+    }
     if (String(url).endsWith('/orders')) return squareResponse(200, { order: squareOrder });
-    if (String(url).endsWith('/customers/search')) {
-      const filter = JSON.parse(options.body).query.filter;
-      return squareResponse(200, {
-        customers: filter.email_address
-          ? (customerMatches.email || [])
-          : (customerMatches.phone || []),
-      });
-    }
-    if (String(url).endsWith('/customers')) {
-      return squareResponse(200, {
-        customer: { id: 'CUSTOMER_123', version: 0, given_name: 'Test', family_name: 'Customer' },
-      });
-    }
     if (String(url).endsWith('/payments')) {
-      const paymentRequest = JSON.parse(options.body);
+      if (overrides.paymentError) return squareResponse(overrides.paymentError.status, overrides.paymentError.body);
       return squareResponse(200, {
         payment: {
           id: 'PAYMENT_123',
@@ -129,9 +133,8 @@ function installSquareMock(calls, customerMatches = {}) {
           amount_money: squareOrder.total_money,
           tip_money: { amount: 163, currency: 'USD' },
           total_money: { amount: 1250, currency: 'USD' },
-          customer_id: paymentRequest.customer_id,
           receipt_url: 'https://square.example/receipt',
-          ...(customerMatches.payment || {}),
+          ...overrides.payment,
         },
       });
     }
@@ -173,16 +176,17 @@ test('rejects a changed Square order total before payment', async () => {
     }
   );
   assert.equal(calls.some((call) => call.url.endsWith('/payments')), false);
+  assert.equal(calls.some((call) => call.url.endsWith('/orders')), false);
 });
 
-test('creates a pickup order with customer details and links the payment', async () => {
+test('creates a pickup order with contact details and links the payment', async () => {
   const calls = [];
   installSquareMock(calls);
 
   const result = await createPaymentRequest({
     ...baseRequest,
     paymentIdempotencyKey: 'checkout-payment-key',
-    sourceId: 'card-source-token',
+    sourceId: 'cnon:card-source-token',
     tipAmount: 163,
   });
 
@@ -207,11 +211,8 @@ test('creates a pickup order with customer details and links the payment', async
   assert.equal(paymentBody.buyer_email_address, 'test@example.com');
   assert.deepEqual(paymentBody.amount_money, { amount: 1087, currency: 'USD' });
   assert.deepEqual(paymentBody.tip_money, { amount: 163, currency: 'USD' });
-  assert.equal(paymentBody.customer_id, 'CUSTOMER_123');
-  const customerCall = calls.find((call) => call.url.endsWith('/customers'));
-  const customerBody = JSON.parse(customerCall.options.body);
-  assert.equal(customerBody.email_address, 'test@example.com');
-  assert.equal(customerBody.phone_number, '+15075550123');
+  assert.equal('customer_id' in paymentBody, false);
+  assert.equal(calls.some((call) => call.url.includes('/customers')), false);
   assert.equal(result.orderId, 'ORDER_123');
   assert.equal(result.amount, 1250);
   assert.equal(result.tipAmount, 163);
@@ -219,7 +220,7 @@ test('creates a pickup order with customer details and links the payment', async
   await createPaymentRequest({
     ...baseRequest,
     paymentIdempotencyKey: 'checkout-payment-key',
-    sourceId: 'card-source-token',
+    sourceId: 'cnon:card-source-token',
     tipAmount: 163,
   });
   const orderKeys = calls
@@ -232,42 +233,59 @@ test('creates a pickup order with customer details and links the payment', async
   assert.deepEqual(paymentKeys, ['checkout-payment-key-payment', 'checkout-payment-key-payment']);
 });
 
-test('never overwrites a Square customer from an unauthenticated checkout form', async () => {
+test('calculates checkout quotes without creating persistent Square data', async () => {
   const calls = [];
-  installSquareMock(calls, {
-    email: [{ id: 'EXISTING_EMAIL_CUSTOMER', email_address: contact.email }],
-    phone: [],
-  });
+  installSquareMock(calls);
 
-  await createPaymentRequest({
-    ...baseRequest,
-    paymentIdempotencyKey: 'safe-customer-payment-key',
-    sourceId: 'card-source-token',
-    tipAmount: 163,
-  });
+  const checkout = await createCheckoutRequest(baseRequest);
 
-  assert.equal(calls.some((call) => call.options.method === 'PUT' && call.url.includes('/customers/')), false);
-  assert.equal(calls.some((call) => call.options.method === 'POST' && call.url.endsWith('/customers')), true);
-  const paymentBody = JSON.parse(calls.find((call) => call.url.endsWith('/payments')).options.body);
-  assert.equal(paymentBody.customer_id, 'CUSTOMER_123');
+  assert.equal(checkout.amount, 1087);
+  assert.equal(calls.some((call) => call.url.endsWith('/orders/calculate')), true);
+  assert.equal(calls.some((call) => call.url.endsWith('/orders')), false);
+  assert.equal(calls.some((call) => call.url.includes('/customers')), false);
 });
 
-test('reuses only an exact email-and-phone Square customer match without changing it', async () => {
+test('rejects malformed payment tokens before creating Square data', async () => {
   const calls = [];
-  const existing = { id: 'EXACT_CUSTOMER', email_address: contact.email, phone_number: '+15075550123' };
-  installSquareMock(calls, { email: [existing], phone: [existing] });
+  installSquareMock(calls);
 
-  await createPaymentRequest({
-    ...baseRequest,
-    paymentIdempotencyKey: 'exact-customer-payment-key',
-    sourceId: 'card-source-token',
-    tipAmount: 163,
+  await assert.rejects(
+    createPaymentRequest({
+      ...baseRequest,
+      paymentIdempotencyKey: 'malformed-payment-key',
+      sourceId: 'not-a-square-token',
+      tipAmount: 163,
+    }),
+    (error) => error.status === 400 && /payment token/.test(error.message)
+  );
+
+  assert.equal(calls.length, 0);
+});
+
+test('cancels an unpaid order after Square rejects payment and never writes customers', async () => {
+  const calls = [];
+  installSquareMock(calls, {
+    paymentError: {
+      status: 400,
+      body: { errors: [{ code: 'INVALID_CARD_DATA', detail: 'Invalid card data.' }] },
+    },
   });
 
-  assert.equal(calls.some((call) => call.options.method === 'PUT' && call.url.includes('/customers/')), false);
-  assert.equal(calls.some((call) => call.options.method === 'POST' && call.url.endsWith('/customers')), false);
-  const paymentBody = JSON.parse(calls.find((call) => call.url.endsWith('/payments')).options.body);
-  assert.equal(paymentBody.customer_id, 'EXACT_CUSTOMER');
+  await assert.rejects(
+    createPaymentRequest({
+      ...baseRequest,
+      paymentIdempotencyKey: 'rejected-payment-key',
+      sourceId: 'cnon:card-source-token',
+      tipAmount: 163,
+    }),
+    (error) => error.status === 400 && error.code === 'PAYMENT_RETRY_ALLOWED'
+  );
+
+  assert.equal(calls.some((call) => call.url.includes('/customers')), false);
+  const cancellations = calls.filter((call) => call.url.includes('/orders/ORDER_123') && call.options.method === 'PUT');
+  assert.equal(cancellations.length, 2);
+  assert.equal(JSON.parse(cancellations[0].options.body).order.fulfillments[0].state, 'CANCELED');
+  assert.equal(JSON.parse(cancellations[1].options.body).order.state, 'CANCELED');
 });
 
 test('does not report success for an incomplete or mismatched Square payment', async () => {
@@ -278,7 +296,7 @@ test('does not report success for an incomplete or mismatched Square payment', a
     createPaymentRequest({
       ...baseRequest,
       paymentIdempotencyKey: 'incomplete-payment-key',
-      sourceId: 'card-source-token',
+      sourceId: 'cnon:card-source-token',
       tipAmount: 163,
     }),
     (error) => error.status === 502 && /completed payment/.test(error.message)
@@ -298,12 +316,13 @@ test('rejects missing required modifiers and unapproved tip amounts before charg
     createPaymentRequest({
       ...baseRequest,
       paymentIdempotencyKey: 'checkout-payment-key-2',
-      sourceId: 'card-source-token',
+      sourceId: 'cnon:card-source-token',
       tipAmount: 999,
     }),
     (error) => error.status === 400 && /tip option/.test(error.message)
   );
   assert.equal(calls.some((call) => call.url.endsWith('/payments')), false);
+  assert.equal(calls.some((call) => call.url.endsWith('/orders')), false);
 });
 
 function requestServer(port, pathname, ip = '203.0.113.25', options = {}) {
@@ -335,7 +354,7 @@ function requestServer(port, pathname, ip = '203.0.113.25', options = {}) {
   });
 }
 
-test('rate limits menu requests and does not expose the diagnostic route', async () => {
+test('rate limits menu requests, ignores spoofed client IP headers, and protects private files', async () => {
   const calls = [];
   installSquareMock(calls);
   const { server } = require('../server');
@@ -383,9 +402,12 @@ test('rate limits menu requests and does not expose the diagnostic route', async
     assert.equal(limited.status, 429);
     assert.equal(limited.headers['ratelimit-limit'], '10');
     assert.ok(Number(limited.headers['retry-after']) >= 1);
+    const spoofedIp = await requestServer(port, '/api/menu', '198.51.100.99');
+    assert.equal(spoofedIp.status, 429);
 
     for (const pathname of ['/api/checkout', '/api/payments']) {
-      for (let index = 0; index < 10; index += 1) {
+      const requestsAlreadyCounted = pathname === '/api/checkout' ? 1 : 0;
+      for (let index = requestsAlreadyCounted; index < 10; index += 1) {
         const response = await requestServer(port, pathname, `203.0.113.${pathname === '/api/checkout' ? 27 : 28}`);
         assert.equal(response.status, 404);
       }

@@ -56,8 +56,22 @@ const securityHeaders = Object.freeze({
 });
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const RATE_LIMIT_MAX = 10;
+const RATE_LIMIT_MAX_BUCKETS = 10_000;
 const rateLimitedPaths = new Set(['/api/menu', '/api/checkout', '/api/payments']);
 const rateLimitBuckets = new Map();
+
+function normalizeIp(value) {
+  const candidate = String(value || '').trim();
+  if (candidate.startsWith('::ffff:') && net.isIP(candidate.slice(7)) === 4) return candidate.slice(7);
+  return net.isIP(candidate) ? candidate : '';
+}
+
+const trustedProxyIps = new Set(
+  String(process.env.TRUSTED_PROXY_IPS || '')
+    .split(',')
+    .map(normalizeIp)
+    .filter(Boolean)
+);
 
 const publicFiles = new Set([
   'index.html',
@@ -100,13 +114,21 @@ function sendText(response, status, message, extraHeaders = {}) {
 }
 
 function getClientIp(request) {
-  const candidates = [
-    request.headers['cf-connecting-ip'],
-    request.headers['x-real-ip'],
-    String(request.headers['x-forwarded-for'] || '').split(',')[0],
-    request.socket.remoteAddress,
-  ];
-  return candidates.map((value) => String(value || '').trim()).find((value) => net.isIP(value)) || 'unknown';
+  const remoteIp = normalizeIp(request.socket.remoteAddress) || 'unknown';
+  if (!trustedProxyIps.has(remoteIp)) return remoteIp;
+
+  // Only a configured reverse proxy may supply the forwarding chain. Walk it
+  // from the trusted socket toward the client so a user-provided leftmost
+  // X-Forwarded-For value cannot skip over an untrusted address.
+  const forwarded = String(request.headers['x-forwarded-for'] || '')
+    .split(',')
+    .map(normalizeIp)
+    .filter(Boolean);
+  let clientIp = remoteIp;
+  for (let index = forwarded.length - 1; index >= 0 && trustedProxyIps.has(clientIp); index -= 1) {
+    clientIp = forwarded[index];
+  }
+  return clientIp;
 }
 
 function checkRateLimit(request, pathname) {
@@ -114,6 +136,17 @@ function checkRateLimit(request, pathname) {
   const key = `${getClientIp(request)}:${pathname}`;
   let bucket = rateLimitBuckets.get(key);
   if (!bucket || now >= bucket.resetAt) {
+    if (!bucket && rateLimitBuckets.size >= RATE_LIMIT_MAX_BUCKETS) {
+      return {
+        allowed: false,
+        headers: {
+          'RateLimit-Limit': String(RATE_LIMIT_MAX),
+          'RateLimit-Remaining': '0',
+          'RateLimit-Reset': String(Math.ceil(RATE_LIMIT_WINDOW_MS / 1000)),
+          'Retry-After': String(Math.ceil(RATE_LIMIT_WINDOW_MS / 1000)),
+        },
+      };
+    }
     bucket = { count: 0, resetAt: now + RATE_LIMIT_WINDOW_MS };
     rateLimitBuckets.set(key, bucket);
   }
