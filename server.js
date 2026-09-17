@@ -17,7 +17,7 @@ function loadEnv(filePath) {
 
 loadEnv(path.join(ROOT, '.env'));
 
-const { SquareApiError, createCheckoutRequest, createPaymentRequest, fetchMenuItems, getPublicConfig } = require('./square-config');
+const { SquareApiError, createCheckoutRequest, createPaymentRequest, fetchMenuItems, getOrderingAvailability, getPublicConfig } = require('./square-config');
 const configuredPort = Number(process.env.PORT);
 const port = Number.isInteger(configuredPort) && configuredPort >= 0 ? configuredPort : 3000;
 const squareEnvironment = getPublicConfig().environment;
@@ -57,7 +57,7 @@ const securityHeaders = Object.freeze({
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const RATE_LIMIT_MAX = 10;
 const RATE_LIMIT_MAX_BUCKETS = 10_000;
-const rateLimitedPaths = new Set(['/api/menu', '/api/checkout', '/api/payments']);
+const rateLimitedPaths = new Set(['/api/menu', '/api/ordering-availability', '/api/checkout', '/api/payments']);
 const rateLimitBuckets = new Map();
 
 function normalizeIp(value) {
@@ -240,6 +240,9 @@ const server = http.createServer(async (request, response) => {
     }
     if (request.method === 'GET' && url.pathname === '/api/menu') {
       return sendJson(response, 200, { categories: await fetchMenuItems() }, rateLimitHeaders);
+    }
+    if (request.method === 'GET' && url.pathname === '/api/ordering-availability') {
+      return sendJson(response, 200, { availability: await getOrderingAvailability() }, rateLimitHeaders);
     }
     if (request.method === 'POST' && url.pathname === '/api/checkout') {
       requireJsonContentType(request);

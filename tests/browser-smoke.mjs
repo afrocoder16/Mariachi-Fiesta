@@ -128,6 +128,7 @@ const firstStep = await evaluate(`(() => ({
 assert.deepEqual(firstStep, { dialogOpen: true, billingVisible: true, paymentHidden: true });
 
 await evaluate(`(() => {
+  document.querySelector('#fulfillment-pickup').click();
   const values = {
     'billing-full-name': 'Test Customer',
     'billing-email': 'test@example.com',

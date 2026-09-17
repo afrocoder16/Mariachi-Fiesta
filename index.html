@@ -383,6 +383,7 @@
       <ul class="cart-list" id="cart-list"></ul>
       <div class="cart-drawer__footer">
         <div class="cart-total"><span>Total</span><strong id="cart-total">$0.00</strong></div>
+        <p class="ordering-availability is-loading" id="ordering-availability" role="status" aria-live="polite">Checking online ordering hours&hellip;</p>
         <p>Menu prices include applicable sales tax. Your total is verified against the current Square catalog before payment.</p>
         <button class="button button--green" id="checkout-button" type="button" disabled><span>Secure checkout</span><span aria-hidden="true">&rarr;</span></button>
       </div>
@@ -428,8 +429,28 @@
 
       <section class="checkout-step" id="billing-step" aria-labelledby="billing-title">
         <h3 id="billing-title">Billing contact</h3>
-        <p>Enter your contact and billing details. Your name, email, and phone are attached to the order in Square for pickup support&mdash;this does not sign you up for marketing.</p>
+        <p>Choose how you will receive your food, then enter your contact and billing details. Your name, email, and phone are attached to the order in Square for order support&mdash;this does not sign you up for marketing.</p>
         <form id="billing-contact-form">
+          <fieldset class="fulfillment-choice" id="fulfillment-choice">
+            <legend>How will you get your order?</legend>
+            <div class="pickup-mode-options">
+              <label><input id="fulfillment-pickup" type="radio" name="fulfillmentType" value="PICKUP" required /><span><strong>Pick up at the restaurant</strong><small>Take your order to go</small></span></label>
+              <label><input id="fulfillment-dine-in" type="radio" name="fulfillmentType" value="DINE_IN" /><span><strong>Eat here</strong><small>Enjoy your order at the restaurant</small></span></label>
+            </div>
+            <p>Choose this first. Your timing options will appear next.</p>
+          </fieldset>
+          <fieldset class="pickup-schedule" id="pickup-schedule" hidden disabled>
+            <legend id="pickup-schedule-legend">When should it be ready?</legend>
+            <div class="pickup-mode-options">
+              <label><input id="pickup-asap" type="radio" name="pickupType" value="ASAP" checked /><span><strong>ASAP</strong><small>Start preparing now</small></span></label>
+              <label><input id="pickup-scheduled" type="radio" name="pickupType" value="SCHEDULED" /><span><strong>Pick a later time</strong><small>Choose an available time</small></span></label>
+            </div>
+            <label class="pickup-time-field" id="pickup-time-field" hidden>
+              <span>Ready time <b aria-hidden="true">*</b></span>
+              <select id="scheduled-pickup-time" name="pickupAt" disabled></select>
+            </label>
+            <p id="pickup-schedule-help">Available times are checked against the restaurant&rsquo;s current Square business hours.</p>
+          </fieldset>
           <div class="billing-fields">
             <label class="billing-field billing-field--wide">
               <span>Full Name <b aria-hidden="true">*</b></span>
@@ -460,8 +481,8 @@
               <input id="billing-postal-code" name="postalCode" type="text" inputmode="numeric" autocomplete="postal-code" pattern="[0-9]{5}(-[0-9]{4})?" placeholder="56258" title="Enter a five-digit ZIP code or ZIP+4" required />
             </label>
             <label class="billing-field billing-field--wide billing-field--note">
-              <span>Pickup note <small>(optional)</small></span>
-              <textarea id="customer-note" name="customerNote" rows="3" maxlength="500" placeholder="Add pickup instructions or a request for the restaurant."></textarea>
+              <span>Order note <small>(optional)</small></span>
+              <textarea id="customer-note" name="customerNote" rows="3" maxlength="500" placeholder="Add order instructions or a request for the restaurant."></textarea>
               <small class="billing-field__help">For allergies or urgent requests, please call us before ordering. <span id="customer-note-count">0/500</span></small>
             </label>
           </div>

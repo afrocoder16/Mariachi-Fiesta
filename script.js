@@ -407,6 +407,7 @@ if (menuBody && menuFilters && Array.isArray(menuData)) {
   const cartToggleTotal = document.getElementById('cart-toggle-total');
   const cartTotal = document.getElementById('cart-total');
   const checkoutButton = document.getElementById('checkout-button');
+  const orderingAvailabilityStatus = document.getElementById('ordering-availability');
   const menuCartButton = document.getElementById('menu-cart-button');
   const weeklyPromoCartButton = document.getElementById('weekly-promo-cart-button');
   const cartAnnouncer = document.getElementById('cart-announcer');
@@ -419,6 +420,15 @@ if (menuBody && menuFilters && Array.isArray(menuData)) {
   const billingStepIndicator = document.getElementById('billing-step-indicator');
   const paymentStepIndicator = document.getElementById('payment-step-indicator');
   const billingContactForm = document.getElementById('billing-contact-form');
+  const fulfillmentPickup = document.getElementById('fulfillment-pickup');
+  const fulfillmentDineIn = document.getElementById('fulfillment-dine-in');
+  const pickupSchedule = document.getElementById('pickup-schedule');
+  const pickupScheduleLegend = document.getElementById('pickup-schedule-legend');
+  const pickupAsap = document.getElementById('pickup-asap');
+  const pickupScheduled = document.getElementById('pickup-scheduled');
+  const pickupTimeField = document.getElementById('pickup-time-field');
+  const scheduledPickupTime = document.getElementById('scheduled-pickup-time');
+  const pickupScheduleHelp = document.getElementById('pickup-schedule-help');
   const checkoutContinue = document.getElementById('checkout-continue');
   const checkoutContinueLabel = document.getElementById('checkout-continue-label');
   const billingBack = document.getElementById('billing-back');
@@ -462,11 +472,13 @@ if (menuBody && menuFilters && Array.isArray(menuData)) {
   let checkoutSession;
   let paymentSourceId;
   let selectedTipAmount = 0;
+  let orderingAvailability;
   let activeCustomItem;
   let activeCustomTrigger;
   let categorySwitchTimer;
 
   const CHECKOUT_SESSION_KEY = 'mariachi-fiesta-checkout-v2';
+  const DINE_IN_NOTE_PREFIX = 'DINE-IN — Customer will eat here';
 
   const escapeSquareHtml = (value) =>
     String(value ?? '').replace(/[&<>"]/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[character]));
@@ -485,6 +497,104 @@ if (menuBody && menuFilters && Array.isArray(menuData)) {
       throw error;
     }
     return payload;
+  }
+
+  function applyOrderingAvailability(availability, unavailable = false) {
+    orderingAvailability = {
+      ...(availability || {}),
+      isOpen: !unavailable && availability?.isOpen === true,
+      message: availability?.message || 'Online ordering is temporarily unavailable. Please call (507) 532-2122.',
+    };
+    orderingAvailabilityStatus.textContent = orderingAvailability.message;
+    orderingAvailabilityStatus.className = `ordering-availability ${unavailable ? 'is-unavailable' : orderingAvailability.isOpen ? 'is-open' : 'is-closed'}`;
+    checkoutButton.disabled = cart.getItems().length === 0 || !orderingAvailability.isOpen;
+    checkoutButton.title = orderingAvailability.isOpen ? '' : orderingAvailability.message;
+    if (!orderingAvailability.isOpen) paymentSubmit.disabled = true;
+    renderPickupSchedule(orderingAvailability);
+    return orderingAvailability;
+  }
+
+  function renderPickupSchedule(availability) {
+    const previousValue = scheduledPickupTime.value;
+    const slots = Array.isArray(availability?.pickup?.slots) ? availability.pickup.slots : [];
+    scheduledPickupTime.replaceChildren();
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = slots.length ? 'Choose a later time' : 'No later times available';
+    scheduledPickupTime.append(placeholder);
+    slots.forEach((slot) => {
+      const option = document.createElement('option');
+      option.value = slot.pickupAt;
+      option.textContent = slot.label;
+      scheduledPickupTime.append(option);
+    });
+    if (slots.some((slot) => slot.pickupAt === previousValue)) scheduledPickupTime.value = previousValue;
+
+    pickupAsap.disabled = !availability?.isOpen || availability?.pickup?.asapAvailable !== true;
+    pickupScheduled.disabled = !availability?.isOpen || slots.length === 0;
+    if (pickupAsap.checked && pickupAsap.disabled && !pickupScheduled.disabled) pickupScheduled.checked = true;
+    if (pickupScheduled.checked && pickupScheduled.disabled && !pickupAsap.disabled) pickupAsap.checked = true;
+    pickupScheduleHelp.textContent = availability?.pickup
+      ? `${availability.pickup.asapAvailable ? `ASAP allows about ${availability.pickup.prepMinutes} minutes for preparation.` : 'ASAP is unavailable before closing; choose a scheduled time.'} Scheduled times are shown in Central Time.`
+      : 'Available times are checked against the restaurant\'s current Square business hours.';
+    updateFulfillmentMode();
+
+    if (previousValue && scheduledPickupTime.value !== previousValue) invalidateCheckoutConfirmation();
+  }
+
+  function getFulfillmentType() {
+    if (fulfillmentPickup.checked) return 'PICKUP';
+    if (fulfillmentDineIn.checked) return 'DINE_IN';
+    return null;
+  }
+
+  function updateCustomerNoteLimit() {
+    const maximum = getFulfillmentType() === 'DINE_IN'
+      ? 500 - DINE_IN_NOTE_PREFIX.length - 1
+      : 500;
+    customerNote.maxLength = maximum;
+    customerNote.setCustomValidity(customerNote.value.length > maximum ? `Use ${maximum} characters or fewer for a dine-in order note.` : '');
+    if (customerNoteCount) customerNoteCount.textContent = `${customerNote.value.length}/${maximum}`;
+  }
+
+  function updateFulfillmentMode() {
+    const fulfillmentType = getFulfillmentType();
+    pickupSchedule.hidden = !fulfillmentType;
+    pickupSchedule.disabled = !fulfillmentType;
+    pickupScheduleLegend.textContent = fulfillmentType === 'DINE_IN'
+      ? 'When should your dine-in order be ready?'
+      : 'When should your pickup order be ready?';
+    updateCustomerNoteLimit();
+    updatePickupMode();
+  }
+
+  function updatePickupMode() {
+    const scheduled = Boolean(getFulfillmentType()) && pickupScheduled.checked && !pickupScheduled.disabled;
+    pickupTimeField.hidden = !scheduled;
+    scheduledPickupTime.disabled = !scheduled;
+    scheduledPickupTime.required = scheduled;
+    if (scheduled && !scheduledPickupTime.value) scheduledPickupTime.selectedIndex = scheduledPickupTime.options.length > 1 ? 1 : 0;
+  }
+
+  function getFulfillmentSelection() {
+    return {
+      fulfillmentType: getFulfillmentType(),
+      ...(pickupScheduled.checked
+        ? { pickupType: 'SCHEDULED', pickupAt: scheduledPickupTime.value }
+        : { pickupType: 'ASAP', pickupAt: null }),
+    };
+  }
+
+  async function refreshOrderingAvailability() {
+    orderingAvailabilityStatus.textContent = 'Checking online ordering hours…';
+    orderingAvailabilityStatus.className = 'ordering-availability is-loading';
+    try {
+      const { availability } = await fetchJson('/api/ordering-availability');
+      return applyOrderingAvailability(availability);
+    } catch (error) {
+      console.error('[Square] Ordering availability request failed:', error.message);
+      return applyOrderingAvailability(null, true);
+    }
   }
 
   function loadSquareSdk(environment) {
@@ -1010,7 +1120,7 @@ if (menuBody && menuFilters && Array.isArray(menuData)) {
     if (!checkoutQuote) checkoutTotal.textContent = formattedTotal;
     checkoutCount.textContent = itemCountLabel(totalQuantity);
     cartEmpty.hidden = items.length > 0;
-    checkoutButton.disabled = items.length === 0;
+    checkoutButton.disabled = items.length === 0 || orderingAvailability?.isOpen !== true;
 
     cartList.innerHTML = items
       .map((item) => {
@@ -1048,6 +1158,11 @@ if (menuBody && menuFilters && Array.isArray(menuData)) {
     if (event.key === 'Escape' && document.body.classList.contains('cart-is-open')) closeCart();
   });
   cart.subscribe(renderCart);
+  refreshOrderingAvailability();
+  window.setInterval(refreshOrderingAvailability, 60_000);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') refreshOrderingAvailability();
+  });
 
   function showBillingStep() {
     billingStep.hidden = false;
@@ -1090,7 +1205,7 @@ if (menuBody && menuFilters && Array.isArray(menuData)) {
     return String(customerNote?.value || '').trim();
   }
 
-  async function checkoutSignature(contact, items, note) {
+  async function checkoutSignature(contact, items, note, fulfillment) {
     const value = JSON.stringify({
       cart: items
         .map((item) => ({
@@ -1103,6 +1218,7 @@ if (menuBody && menuFilters && Array.isArray(menuData)) {
         .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))),
       contact,
       customerNote: note,
+      fulfillment,
     });
     const digest = await window.crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
     return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
@@ -1129,8 +1245,8 @@ if (menuBody && menuFilters && Array.isArray(menuData)) {
     }
   }
 
-  async function ensureCheckoutSession(contact, items, note) {
-    const signature = await checkoutSignature(contact, items, note);
+  async function ensureCheckoutSession(contact, items, note, fulfillment) {
+    const signature = await checkoutSignature(contact, items, note, fulfillment);
     const stored = readCheckoutSession();
     const next = stored?.signature === signature
       ? stored
@@ -1182,6 +1298,7 @@ if (menuBody && menuFilters && Array.isArray(menuData)) {
       })),
       billingContact: contact,
       customerNote: note,
+      ...getFulfillmentSelection(),
       expectedAmount,
       expectedCurrency,
     };
@@ -1242,7 +1359,7 @@ if (menuBody && menuFilters && Array.isArray(menuData)) {
 
   async function initializeCard() {
     if (squareCard) {
-      paymentSubmit.disabled = false;
+      paymentSubmit.disabled = orderingAvailability?.isOpen !== true;
       return squareCard;
     }
     if (cardInitialization) return cardInitialization;
@@ -1255,7 +1372,7 @@ if (menuBody && menuFilters && Array.isArray(menuData)) {
       squareCard = await payments.card();
       await squareCard.attach('#card-container');
       paymentStatus.textContent = '';
-      paymentSubmit.disabled = false;
+      paymentSubmit.disabled = orderingAvailability?.isOpen !== true;
       console.log('[Square] Web Payments card form initialized');
       return squareCard;
     })().catch((error) => {
@@ -1268,7 +1385,12 @@ if (menuBody && menuFilters && Array.isArray(menuData)) {
     return cardInitialization;
   }
 
-  checkoutButton.addEventListener('click', () => {
+  checkoutButton.addEventListener('click', async () => {
+    const availability = await refreshOrderingAvailability();
+    if (!availability.isOpen) {
+      cartAnnouncer.textContent = availability.message;
+      return;
+    }
     closeCart();
     checkoutDialog.showModal();
     showBillingStep();
@@ -1300,7 +1422,8 @@ if (menuBody && menuFilters && Array.isArray(menuData)) {
       const contact = getBillingContact();
       const items = cart.getItems();
       const note = getCustomerNote();
-      const session = await ensureCheckoutSession(contact, items, note);
+      const fulfillment = getFulfillmentSelection();
+      const session = await ensureCheckoutSession(contact, items, note, fulfillment);
       const confirmedQuote = checkoutQuote?.orderKey === session.orderKey ? checkoutQuote : null;
       const expectedAmount = confirmedQuote?.amount ?? cart.calculateTotal();
       const expectedCurrency = confirmedQuote?.currency || items[0]?.currency || 'USD';
@@ -1320,7 +1443,13 @@ if (menuBody && menuFilters && Array.isArray(menuData)) {
         checkoutContinueLabel.textContent = 'Confirm updated total';
         paymentStatus.className = 'payment-status is-warning';
         paymentStatus.textContent = `Your order total changed to ${formatMoney(error.payload.checkout.amount, error.payload.checkout.currency)}. Review it and confirm before entering payment.`;
+      } else if (error.payload?.code === 'INVALID_PICKUP_TIME') {
+        applyOrderingAvailability(error.payload.availability);
+        checkoutContinueLabel.textContent = 'Choose another pickup time';
+        paymentStatus.className = 'payment-status is-warning';
+        paymentStatus.textContent = error.message;
       } else {
+        if (error.payload?.code === 'ORDERING_CLOSED') applyOrderingAvailability(error.payload.availability);
         checkoutContinueLabel.textContent = 'Try again';
         paymentStatus.textContent = error.message || 'The order total could not be verified. Please try again.';
       }
@@ -1329,9 +1458,7 @@ if (menuBody && menuFilters && Array.isArray(menuData)) {
     }
   });
 
-  billingContactForm.addEventListener('input', (event) => {
-    event.target.setCustomValidity('');
-    if (event.target === customerNote && customerNoteCount) customerNoteCount.textContent = `${customerNote.value.length}/500`;
+  function invalidateCheckoutConfirmation() {
     checkoutQuote = null;
     checkoutSession = null;
     paymentSourceId = null;
@@ -1341,7 +1468,17 @@ if (menuBody && menuFilters && Array.isArray(menuData)) {
     const items = cart.getItems();
     checkoutTotal.textContent = formatMoney(cart.calculateTotal(), items[0]?.currency || 'USD');
     checkoutContinueLabel.textContent = 'Continue to payment';
+  }
+
+  billingContactForm.addEventListener('input', (event) => {
+    event.target.setCustomValidity('');
+    if (event.target === customerNote) updateCustomerNoteLimit();
+    invalidateCheckoutConfirmation();
   });
+  fulfillmentPickup.addEventListener('change', updateFulfillmentMode);
+  fulfillmentDineIn.addEventListener('change', updateFulfillmentMode);
+  pickupAsap.addEventListener('change', updatePickupMode);
+  pickupScheduled.addEventListener('change', updatePickupMode);
   tipOptions.addEventListener('change', (event) => {
     if (event.target.matches('input[name="tipAmount"]')) setSelectedTip(Number(event.target.value), true);
   });
@@ -1361,6 +1498,13 @@ if (menuBody && menuFilters && Array.isArray(menuData)) {
     if (!items.length || !checkoutQuote || !checkoutSession) {
       showBillingStep();
       paymentStatus.textContent = 'Please confirm your contact information and current order total again.';
+      return;
+    }
+
+    const availability = await refreshOrderingAvailability();
+    if (!availability.isOpen) {
+      paymentStatus.className = 'payment-status is-warning';
+      paymentStatus.textContent = availability.message;
       return;
     }
 
@@ -1405,7 +1549,7 @@ if (menuBody && menuFilters && Array.isArray(menuData)) {
       cart.clear();
       paymentStep.hidden = true;
       billingContactForm.reset();
-      if (customerNoteCount) customerNoteCount.textContent = '0/500';
+      updateFulfillmentMode();
       clearCheckoutSession();
       paymentStatus.className = 'payment-status is-success';
       paymentStatus.textContent = `Payment successful — ${formatMoney(result.payment.amount, result.payment.currency)} paid.`;
@@ -1425,12 +1569,23 @@ if (menuBody && menuFilters && Array.isArray(menuData)) {
         checkoutContinueLabel.textContent = 'Confirm updated total';
         paymentStatus.className = 'payment-status is-warning';
         paymentStatus.textContent = `Your order total changed to ${formatMoney(error.payload.checkout.amount, error.payload.checkout.currency)}. Confirm it before trying payment again.`;
+      } else if (error.payload?.code === 'INVALID_PICKUP_TIME') {
+        paymentSourceId = null;
+        applyOrderingAvailability(error.payload.availability);
+        showBillingStep();
+        checkoutContinueLabel.textContent = 'Choose another pickup time';
+        paymentStatus.className = 'payment-status is-warning';
+        paymentStatus.textContent = error.message;
       } else {
+        if (error.payload?.code === 'ORDERING_CLOSED') {
+          paymentSourceId = null;
+          applyOrderingAvailability(error.payload.availability);
+        }
         if (error.payload?.code === 'PAYMENT_RETRY_ALLOWED') rotatePaymentAttempt();
         paymentStatus.textContent = error.message || 'Payment could not be completed. Please try again.';
       }
       console.error('[Square] Payment failed:', error.message);
-      paymentSubmit.disabled = false;
+      paymentSubmit.disabled = orderingAvailability?.isOpen !== true;
     } finally {
       if (checkoutQuote) updateCheckoutTotals();
       else paymentSubmitLabel.textContent = 'Pay securely';

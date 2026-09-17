@@ -16,6 +16,15 @@ const apiVersion = process.env.SQUARE_API_VERSION || '2026-08-19';
 const apiEndpoint =
   process.env.SQUARE_API_ENDPOINT ||
   (environment === 'production' ? 'https://connect.squareup.com/v2' : 'https://connect.squareupsandbox.com/v2');
+const MARSHALL_TIME_ZONE = 'America/Chicago';
+const BUSINESS_HOURS_CACHE_MS = 5 * 60_000;
+const DAY_CODES = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
+const WEEKDAY_CODES = Object.freeze({ Sun: 'SUN', Mon: 'MON', Tue: 'TUE', Wed: 'WED', Thu: 'THU', Fri: 'FRI', Sat: 'SAT' });
+const PICKUP_PREP_MINUTES = environmentInteger('PICKUP_PREP_MINUTES', 20, 5, 240);
+const PICKUP_SLOT_INTERVAL_MINUTES = 15;
+const PICKUP_SCHEDULE_DAYS = 7;
+const DINE_IN_NOTE_PREFIX = 'DINE-IN — Customer will eat here';
+let businessScheduleCache = null;
 
 const missing = [
   ['SQUARE_APPLICATION_ID', applicationId],
@@ -25,6 +34,16 @@ const missing = [
 
 if (missing.length) {
   throw new Error(`Missing Square configuration: ${missing.map(([name]) => name).join(', ')}`);
+}
+
+function environmentInteger(name, fallback, minimum, maximum) {
+  const raw = String(process.env[name] || '').trim();
+  if (!raw) return fallback;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < minimum || value > maximum) {
+    throw new Error(`${name} must be an integer from ${minimum} to ${maximum}.`);
+  }
+  return value;
 }
 
 class SquareApiError extends Error {
@@ -64,6 +83,236 @@ async function squareRequest(path, options = {}) {
   }
 
   return payload;
+}
+
+function parseBusinessTime(value) {
+  const match = String(value || '').match(/^([01]\d|2[0-3]):([0-5]\d)(?::([0-5]\d))?$/);
+  if (!match) return null;
+  return Number(match[1]) * 3600 + Number(match[2]) * 60 + Number(match[3] || 0);
+}
+
+function normalizeBusinessSchedule(location) {
+  if (!location || location.id !== locationId || location.status !== 'ACTIVE') {
+    throw new SquareApiError('The Square location is not available for online ordering.', 503);
+  }
+  if (location.timezone !== MARSHALL_TIME_ZONE) {
+    throw new SquareApiError('The Square location timezone is not configured for Marshall, Minnesota.', 503);
+  }
+
+  const periods = Array.isArray(location.business_hours?.periods)
+    ? location.business_hours.periods.map((period) => ({
+      dayOfWeek: String(period?.day_of_week || ''),
+      startLocalTime: String(period?.start_local_time || ''),
+      endLocalTime: String(period?.end_local_time || ''),
+      startSeconds: parseBusinessTime(period?.start_local_time),
+      endSeconds: parseBusinessTime(period?.end_local_time),
+    }))
+    : [];
+  if (!periods.length || periods.some((period) => (
+    !DAY_CODES.includes(period.dayOfWeek) || period.startSeconds === null ||
+    period.endSeconds === null || period.startSeconds === period.endSeconds
+  ))) {
+    throw new SquareApiError('Business hours are not configured in Square. Online ordering is unavailable.', 503);
+  }
+
+  return {
+    timeZone: location.timezone,
+    periods,
+  };
+}
+
+async function getBusinessSchedule() {
+  const now = Date.now();
+  if (businessScheduleCache && now < businessScheduleCache.expiresAt) return businessScheduleCache.schedule;
+  const payload = await squareRequest(`/locations/${encodeURIComponent(locationId)}`);
+  const schedule = normalizeBusinessSchedule(payload.location);
+  businessScheduleCache = { schedule, expiresAt: now + BUSINESS_HOURS_CACHE_MS };
+  return schedule;
+}
+
+function clearBusinessScheduleCache() {
+  businessScheduleCache = null;
+}
+
+function localTimeParts(instant, timeZone) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    weekday: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(instant);
+  const values = Object.fromEntries(parts.filter((part) => part.type !== 'literal').map((part) => [part.type, part.value]));
+  return {
+    dayOfWeek: WEEKDAY_CODES[values.weekday],
+    seconds: Number(values.hour) * 3600 + Number(values.minute) * 60 + Number(values.second),
+  };
+}
+
+function isOpenAt(instant, schedule) {
+  const local = localTimeParts(instant, schedule.timeZone);
+  const dayIndex = DAY_CODES.indexOf(local.dayOfWeek);
+  if (dayIndex < 0) return false;
+  const previousDay = DAY_CODES[(dayIndex + DAY_CODES.length - 1) % DAY_CODES.length];
+
+  return schedule.periods.some((period) => {
+    if (period.dayOfWeek === local.dayOfWeek) {
+      if (period.endSeconds > period.startSeconds) {
+        return local.seconds >= period.startSeconds && local.seconds < period.endSeconds;
+      }
+      return local.seconds >= period.startSeconds;
+    }
+    return period.dayOfWeek === previousDay && period.endSeconds < period.startSeconds && local.seconds < period.endSeconds;
+  });
+}
+
+function findNextOpenAt(instant, schedule) {
+  const minute = 60_000;
+  let candidate = Math.floor(instant.getTime() / minute) * minute + minute;
+  const limit = candidate + 8 * 24 * 60 * minute;
+  for (; candidate <= limit; candidate += minute) {
+    const date = new Date(candidate);
+    if (isOpenAt(date, schedule)) return date.toISOString();
+  }
+  return null;
+}
+
+function formatOpeningTime(value, timeZone) {
+  if (!value) return '';
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    weekday: 'long',
+    hour: 'numeric',
+    minute: '2-digit',
+    timeZoneName: 'short',
+  }).format(new Date(value));
+}
+
+function formatPickupSlot(instant, timeZone) {
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    timeZoneName: 'short',
+  }).format(instant);
+}
+
+function buildPickupSlots(instant, schedule) {
+  const intervalMs = PICKUP_SLOT_INTERVAL_MINUTES * 60_000;
+  const earliest = instant.getTime() + PICKUP_PREP_MINUTES * 60_000;
+  const firstSlot = Math.ceil(earliest / intervalMs) * intervalMs;
+  const lastSlot = instant.getTime() + PICKUP_SCHEDULE_DAYS * 24 * 60 * 60_000;
+  const slots = [];
+  for (let value = firstSlot; value <= lastSlot; value += intervalMs) {
+    const slot = new Date(value);
+    if (isOpenAt(slot, schedule)) {
+      slots.push({ pickupAt: slot.toISOString(), label: formatPickupSlot(slot, schedule.timeZone) });
+    }
+  }
+  return slots;
+}
+
+async function getOrderingAvailability(instant = new Date()) {
+  const now = instant instanceof Date ? instant : new Date(instant);
+  if (Number.isNaN(now.getTime())) throw new TypeError('A valid availability time is required.');
+  const schedule = await getBusinessSchedule();
+  const isOpen = isOpenAt(now, schedule);
+  const nextOpenAt = isOpen ? null : findNextOpenAt(now, schedule);
+  const nextOpening = formatOpeningTime(nextOpenAt, schedule.timeZone);
+  const pickupSlots = isOpen ? buildPickupSlots(now, schedule) : [];
+  const asapReadyAt = new Date(now.getTime() + PICKUP_PREP_MINUTES * 60_000);
+  const asapAvailable = isOpen && isOpenAt(asapReadyAt, schedule);
+  return {
+    isOpen,
+    timeZone: schedule.timeZone,
+    checkedAt: now.toISOString(),
+    nextOpenAt,
+    message: isOpen
+      ? 'Online ordering is open now.'
+      : `Online ordering is currently closed.${nextOpening ? ` Ordering reopens ${nextOpening}.` : ''}`,
+    periods: schedule.periods.map((period) => ({
+      dayOfWeek: period.dayOfWeek,
+      startLocalTime: period.startLocalTime,
+      endLocalTime: period.endLocalTime,
+    })),
+    pickup: {
+      prepMinutes: PICKUP_PREP_MINUTES,
+      asapAvailable,
+      asapReadyAt: asapAvailable ? asapReadyAt.toISOString() : null,
+      slotIntervalMinutes: PICKUP_SLOT_INTERVAL_MINUTES,
+      scheduleDays: PICKUP_SCHEDULE_DAYS,
+      slots: pickupSlots,
+    },
+  };
+}
+
+async function assertOrderingOpen(instant = new Date()) {
+  const availability = await getOrderingAvailability(instant);
+  if (!availability.isOpen) {
+    throw new SquareApiError(availability.message, 409, [], 'ORDERING_CLOSED', { availability });
+  }
+  return availability;
+}
+
+function validatePickupSelection(request, availability) {
+  const fulfillmentType = String(request?.fulfillmentType || '').toUpperCase();
+  if (!['PICKUP', 'DINE_IN'].includes(fulfillmentType)) {
+    throw new SquareApiError(
+      'Choose whether you will pick up your order or eat at the restaurant.',
+      400,
+      [],
+      'INVALID_FULFILLMENT_TYPE',
+      { availability }
+    );
+  }
+
+  const pickupType = String(request?.pickupType || 'ASAP').toUpperCase();
+  if (pickupType === 'ASAP') {
+    if (!availability.pickup.asapAvailable) {
+      throw new SquareApiError(
+        'ASAP ordering is no longer available before closing. Choose a later time.',
+        409,
+        [],
+        'INVALID_PICKUP_TIME',
+        { availability }
+      );
+    }
+    return { fulfillmentType, scheduleType: 'ASAP', pickupAt: null, prepMinutes: PICKUP_PREP_MINUTES };
+  }
+  if (pickupType !== 'SCHEDULED' || typeof request?.pickupAt !== 'string') {
+    throw new SquareApiError('Choose ASAP or an available later time.', 400, [], 'INVALID_PICKUP_TIME', { availability });
+  }
+
+  const requestedTime = new Date(request.pickupAt);
+  const matchingSlot = availability.pickup.slots.find((slot) => (
+    !Number.isNaN(requestedTime.getTime()) && new Date(slot.pickupAt).getTime() === requestedTime.getTime()
+  ));
+  if (!matchingSlot) {
+    throw new SquareApiError('That ready time is no longer available. Choose another time.', 409, [], 'INVALID_PICKUP_TIME', { availability });
+  }
+  return { fulfillmentType, scheduleType: 'SCHEDULED', pickupAt: matchingSlot.pickupAt, prepMinutes: PICKUP_PREP_MINUTES };
+}
+
+function buildFulfillmentNote(customerNote, fulfillmentType) {
+  if (fulfillmentType !== 'DINE_IN') {
+    return customerNote || 'Pickup order placed on the Mariachi Fiesta website.';
+  }
+
+  const note = customerNote ? `${DINE_IN_NOTE_PREFIX}\n${customerNote}` : DINE_IN_NOTE_PREFIX;
+  if (note.length > 500) {
+    const maximumCustomerNoteLength = 500 - DINE_IN_NOTE_PREFIX.length - 1;
+    throw new SquareApiError(
+      `Dine-in order notes must be ${maximumCustomerNoteLength} characters or fewer.`,
+      400,
+      [],
+      'INVALID_CUSTOMER_NOTE'
+    );
+  }
+  return note;
 }
 
 function isAtLocation(object) {
@@ -396,7 +645,7 @@ function validateBillingContact(contact = {}) {
 
 function validateCustomerNote(value) {
   if (value !== undefined && value !== null && typeof value !== 'string') {
-    throw new SquareApiError('Pickup notes must be plain text.', 400);
+    throw new SquareApiError('Order notes must be plain text.', 400);
   }
   const note = String(value || '')
     .replace(/\r\n?/g, '\n')
@@ -405,7 +654,7 @@ function validateCustomerNote(value) {
     .replace(/\n{3,}/g, '\n\n')
     .trim();
   if (note.length > 500) {
-    throw new SquareApiError('Pickup notes must be 500 characters or fewer.', 400);
+    throw new SquareApiError('Order notes must be 500 characters or fewer.', 400);
   }
   return note;
 }
@@ -441,7 +690,7 @@ function validateExpectedTotal(expectedAmount, expectedCurrency) {
   return { amount, currency };
 }
 
-function checkoutSummary(order, lines) {
+function checkoutSummary(order, lines, pickup) {
   const amount = Number(order.total_money?.amount);
   const currency = order.total_money?.currency || lines[0]?.currency || 'USD';
   if (!Number.isSafeInteger(amount) || amount < 0) {
@@ -459,15 +708,19 @@ function checkoutSummary(order, lines) {
     taxIncluded: (order.taxes || []).some((tax) => tax.type === 'INCLUSIVE'),
     tipOptions: smartTipOptions(amount, currency),
     items: lines,
+    pickup,
   };
 }
 
-async function prepareSquareOrderRequest(request = {}) {
+async function prepareSquareOrderRequest(request = {}, instant = new Date()) {
   const { orderIdempotencyKey, idempotencyKey, cart, billingContact, customerNote, expectedAmount, expectedCurrency } = request || {};
   const checkoutKey = validateIdempotencyKey(orderIdempotencyKey || idempotencyKey);
   const contact = validateBillingContact(billingContact);
   const pickupNote = validateCustomerNote(customerNote);
   const expected = validateExpectedTotal(expectedAmount, expectedCurrency);
+  const availability = await assertOrderingOpen(instant);
+  const pickup = validatePickupSelection(request, availability);
+  const fulfillmentNote = buildFulfillmentNote(pickupNote, pickup.fulfillmentType);
 
   // Confirm availability, then let Square calculate the authoritative order total.
   const menu = await fetchMenuItems();
@@ -495,26 +748,28 @@ async function prepareSquareOrderRequest(request = {}) {
         type: 'PICKUP',
         state: 'PROPOSED',
         pickup_details: {
-          schedule_type: 'ASAP',
+          schedule_type: pickup.scheduleType,
+          prep_time_duration: `PT${pickup.prepMinutes}M`,
+          ...(pickup.pickupAt ? { pickup_at: pickup.pickupAt } : {}),
           recipient: {
             display_name: contact.displayName,
             email_address: contact.email,
             phone_number: contact.phone,
           },
-          note: pickupNote || 'Pickup order placed on the Mariachi Fiesta website.',
+          note: fulfillmentNote,
         },
       },
     ],
   };
-  return { checkoutKey, contact, expected, lines, order };
+  return { checkoutKey, contact, expected, lines, order, availability, pickup };
 }
 
-function verifySquareOrder(order, lines, expected, requireId) {
+function verifySquareOrder(order, lines, expected, requireId, pickup) {
   if (!order || (requireId && !order.id) || order.location_id !== locationId) {
     throw new SquareApiError('Square did not return a valid order.', 502);
   }
 
-  const checkout = checkoutSummary(order, lines);
+  const checkout = checkoutSummary(order, lines, pickup);
   if (checkout.amount !== expected.amount || checkout.currency !== expected.currency) {
     throw new SquareApiError(
       'The order total changed. Review and confirm the updated total before paying.',
@@ -527,17 +782,17 @@ function verifySquareOrder(order, lines, expected, requireId) {
   return checkout;
 }
 
-async function calculateSquareOrder(request = {}) {
-  const prepared = await prepareSquareOrderRequest(request);
+async function calculateSquareOrder(request = {}, instant = new Date()) {
+  const prepared = await prepareSquareOrderRequest(request, instant);
   const payload = await squareRequest('/orders/calculate', {
     method: 'POST',
     body: JSON.stringify({ order: prepared.order }),
   });
-  return verifySquareOrder(payload.order, prepared.lines, prepared.expected, false);
+  return verifySquareOrder(payload.order, prepared.lines, prepared.expected, false, prepared.pickup);
 }
 
-async function createSquareOrder(request = {}) {
-  const prepared = await prepareSquareOrderRequest(request);
+async function createSquareOrder(request = {}, instant = new Date()) {
+  const prepared = await prepareSquareOrderRequest(request, instant);
   const payload = await squareRequest('/orders', {
     method: 'POST',
     body: JSON.stringify({
@@ -545,7 +800,7 @@ async function createSquareOrder(request = {}) {
       order: prepared.order,
     }),
   });
-  const checkout = verifySquareOrder(payload.order, prepared.lines, prepared.expected, true);
+  const checkout = verifySquareOrder(payload.order, prepared.lines, prepared.expected, true, prepared.pickup);
   return { ...prepared, order: payload.order, checkout };
 }
 
@@ -585,12 +840,12 @@ async function cancelUnpaidOrder(order, checkoutKey) {
 }
 
 /** Calculates a checkout quote without creating a persistent Square order. */
-async function createCheckoutRequest(request = {}) {
-  return calculateSquareOrder(request);
+async function createCheckoutRequest(request = {}, instant = new Date()) {
+  return calculateSquareOrder(request, instant);
 }
 
 /** Revalidates the checkout, creates the Square order, and links its payment. */
-async function createPaymentRequest(request = {}) {
+async function createPaymentRequest(request = {}, instant = new Date()) {
   const { sourceId, paymentIdempotencyKey, tipAmount } = request || {};
   if (typeof sourceId !== 'string' || !/^cnon:[a-zA-Z0-9_-]{8,495}$/.test(sourceId)) {
     throw new SquareApiError('A valid payment token is required.', 400);
@@ -599,7 +854,7 @@ async function createPaymentRequest(request = {}) {
   // Reject malformed tip attempts before creating any persistent Square data.
   validateTipAmount(tipAmount, validateExpectedTotal(request.expectedAmount, request.expectedCurrency));
 
-  const { checkoutKey, contact, order, checkout } = await createSquareOrder(request);
+  const { checkoutKey, contact, order, checkout } = await createSquareOrder(request, instant);
   const validatedTip = validateTipAmount(tipAmount, checkout);
   let payload;
   try {
@@ -656,6 +911,7 @@ async function createPaymentRequest(request = {}) {
     tipAmount: paymentTip,
     currency: payment.amount_money?.currency || checkout.currency,
     customerId: payment.customer_id || null,
+    pickup: checkout.pickup,
   };
 }
 
@@ -669,8 +925,12 @@ module.exports = {
   SquareApiError,
   createCheckoutRequest,
   createPaymentRequest,
+  clearBusinessScheduleCache,
   fetchMenuItems,
+  getOrderingAvailability,
   getPublicConfig,
+  isOpenAt,
+  validatePickupSelection,
   validateBillingContact,
   validateCart,
   validateCustomerNote,

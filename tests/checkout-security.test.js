@@ -90,9 +90,47 @@ const baseRequest = {
   cart: [{ variationId: 'VARIATION_TACO', quantity: 1, modifiers: [{ modifierId: 'MODIFIER_CORN', quantity: 1 }] }],
   billingContact: contact,
   customerNote: 'Please include extra napkins.',
+  fulfillmentType: 'PICKUP',
   expectedAmount: 1087,
   expectedCurrency: 'USD',
 };
+const OPEN_NOW = new Date('2026-09-08T17:00:00.000Z'); // Tuesday at noon in Marshall.
+const CLOSED_NOW = new Date('2026-09-09T03:00:00.000Z'); // Tuesday at 10 PM in Marshall.
+const LATE_OPEN_NOW = new Date('2026-09-09T01:40:00.000Z'); // Tuesday at 8:40 PM in Marshall.
+const squareLocation = {
+  id: 'TEST_LOCATION',
+  status: 'ACTIVE',
+  timezone: 'America/Chicago',
+  business_hours: {
+    periods: ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'].map((day_of_week) => ({
+      day_of_week,
+      start_local_time: '11:00:00',
+      end_local_time: '21:00:00',
+    })),
+  },
+};
+
+function locationClosedAt(instant = new Date()) {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Chicago',
+    weekday: 'short',
+    hour: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(instant).filter((part) => part.type !== 'literal').map((part) => [part.type, part.value]));
+  const day = { Sun: 'SUN', Mon: 'MON', Tue: 'TUE', Wed: 'WED', Thu: 'THU', Fri: 'FRI', Sat: 'SAT' }[parts.weekday];
+  const startHour = (Number(parts.hour) + 2) % 24;
+  const endHour = (startHour + 1) % 24;
+  return {
+    ...squareLocation,
+    business_hours: {
+      periods: [{
+        day_of_week: day,
+        start_local_time: `${String(startHour).padStart(2, '0')}:00:00`,
+        end_local_time: `${String(endHour).padStart(2, '0')}:00:00`,
+      }],
+    },
+  };
+}
 
 function squareResponse(status, body) {
   return {
@@ -105,6 +143,9 @@ function squareResponse(status, body) {
 function installSquareMock(calls, overrides = {}) {
   global.fetch = async (url, options = {}) => {
     calls.push({ url: String(url), options });
+    if (String(url).includes('/locations/TEST_LOCATION')) {
+      return squareResponse(200, { location: overrides.location || squareLocation });
+    }
     if (String(url).includes('/catalog/list')) return squareResponse(200, catalog);
     if (String(url).endsWith('/orders/calculate')) {
       const calculatedOrder = { ...squareOrder };
@@ -142,7 +183,14 @@ function installSquareMock(calls, overrides = {}) {
   };
 }
 
-const { createCheckoutRequest, createPaymentRequest, validateCustomerNote, validateTipAmount } = require('../square-config');
+const {
+  clearBusinessScheduleCache,
+  createCheckoutRequest,
+  createPaymentRequest,
+  getOrderingAvailability,
+  validateCustomerNote,
+  validateTipAmount,
+} = require('../square-config');
 
 test('matches Square smart-tip choices for small and regular totals', () => {
   assert.equal(validateTipAmount(100, { amount: 550, currency: 'USD' }), 100);
@@ -151,7 +199,7 @@ test('matches Square smart-tip choices for small and regular totals', () => {
   assert.throws(() => validateTipAmount(164, { amount: 1087, currency: 'USD' }), /tip option/);
 });
 
-test('normalizes pickup notes and enforces Square\'s 500-character limit', () => {
+test('normalizes order notes and enforces Square\'s 500-character limit', () => {
   assert.equal(validateCustomerNote('  Please   ring the bell.\r\nThank you!  '), 'Please ring the bell.\nThank you!');
   assert.equal(validateCustomerNote(''), '');
   assert.throws(() => validateCustomerNote({ note: 'not plain text' }), /plain text/);
@@ -163,7 +211,7 @@ test('rejects a changed Square order total before payment', async () => {
   installSquareMock(calls);
 
   await assert.rejects(
-    createCheckoutRequest({ ...baseRequest, expectedAmount: 1000 }),
+    createCheckoutRequest({ ...baseRequest, expectedAmount: 1000 }, OPEN_NOW),
     (error) => {
       assert.equal(error.status, 409);
       assert.equal(error.code, 'PRICE_CHANGED');
@@ -179,7 +227,7 @@ test('rejects a changed Square order total before payment', async () => {
   assert.equal(calls.some((call) => call.url.endsWith('/orders')), false);
 });
 
-test('creates a pickup order with contact details and links the payment', async () => {
+test('creates a pickup ASAP order with contact details and links the payment', async () => {
   const calls = [];
   installSquareMock(calls);
 
@@ -188,7 +236,7 @@ test('creates a pickup order with contact details and links the payment', async 
     paymentIdempotencyKey: 'checkout-payment-key',
     sourceId: 'cnon:card-source-token',
     tipAmount: 163,
-  });
+  }, OPEN_NOW);
 
   const orderCall = calls.find((call) => call.url.endsWith('/orders'));
   const paymentCall = calls.find((call) => call.url.endsWith('/payments'));
@@ -205,6 +253,8 @@ test('creates a pickup order with contact details and links the payment', async 
   assert.equal(orderBody.order.fulfillments[0].pickup_details.recipient.email_address, 'test@example.com');
   assert.equal(orderBody.order.fulfillments[0].pickup_details.recipient.phone_number, '+15075550123');
   assert.equal(orderBody.order.fulfillments[0].pickup_details.note, 'Please include extra napkins.');
+  assert.equal(orderBody.order.fulfillments[0].pickup_details.schedule_type, 'ASAP');
+  assert.equal(orderBody.order.fulfillments[0].pickup_details.prep_time_duration, 'PT20M');
   assert.equal(orderBody.idempotency_key, 'checkout-order-key-order');
   assert.equal(paymentBody.idempotency_key, 'checkout-payment-key-payment');
   assert.equal(paymentBody.order_id, 'ORDER_123');
@@ -216,13 +266,14 @@ test('creates a pickup order with contact details and links the payment', async 
   assert.equal(result.orderId, 'ORDER_123');
   assert.equal(result.amount, 1250);
   assert.equal(result.tipAmount, 163);
+  assert.deepEqual(result.pickup, { fulfillmentType: 'PICKUP', scheduleType: 'ASAP', pickupAt: null, prepMinutes: 20 });
 
   await createPaymentRequest({
     ...baseRequest,
     paymentIdempotencyKey: 'checkout-payment-key',
     sourceId: 'cnon:card-source-token',
     tipAmount: 163,
-  });
+  }, OPEN_NOW);
   const orderKeys = calls
     .filter((call) => call.url.endsWith('/orders'))
     .map((call) => JSON.parse(call.options.body).idempotency_key);
@@ -233,16 +284,183 @@ test('creates a pickup order with contact details and links the payment', async 
   assert.deepEqual(paymentKeys, ['checkout-payment-key-payment', 'checkout-payment-key-payment']);
 });
 
-test('calculates checkout quotes without creating persistent Square data', async () => {
+test('allows checkout during Square business hours without creating persistent data', async () => {
   const calls = [];
+  clearBusinessScheduleCache();
   installSquareMock(calls);
 
-  const checkout = await createCheckoutRequest(baseRequest);
+  const checkout = await createCheckoutRequest(baseRequest, OPEN_NOW);
+  const availability = await getOrderingAvailability(OPEN_NOW);
 
   assert.equal(checkout.amount, 1087);
+  assert.equal(availability.isOpen, true);
+  assert.equal(availability.timeZone, 'America/Chicago');
   assert.equal(calls.some((call) => call.url.endsWith('/orders/calculate')), true);
   assert.equal(calls.some((call) => call.url.endsWith('/orders')), false);
   assert.equal(calls.some((call) => call.url.includes('/customers')), false);
+});
+
+test('requires a supported fulfillment choice and enforces the dine-in note limit', async () => {
+  const calls = [];
+  clearBusinessScheduleCache();
+  installSquareMock(calls);
+
+  const missingFulfillment = { ...baseRequest };
+  delete missingFulfillment.fulfillmentType;
+  await assert.rejects(
+    createCheckoutRequest(missingFulfillment, OPEN_NOW),
+    (error) => error.status === 400 && error.code === 'INVALID_FULFILLMENT_TYPE'
+  );
+  await assert.rejects(
+    createCheckoutRequest({ ...baseRequest, fulfillmentType: 'DINE_IN', customerNote: 'x'.repeat(468) }, OPEN_NOW),
+    (error) => error.status === 400 && error.code === 'INVALID_CUSTOMER_NOTE' && /467 characters/.test(error.message)
+  );
+  assert.equal(calls.some((call) => call.url.includes('/catalog/list')), false);
+  assert.equal(calls.some((call) => call.url.endsWith('/orders')), false);
+});
+
+test('rejects pickup and dine-in ASAP and scheduled checkout outside Square business hours', async () => {
+  const calls = [];
+  clearBusinessScheduleCache();
+  installSquareMock(calls);
+
+  const combinations = [
+    { fulfillmentType: 'PICKUP', pickupType: 'ASAP' },
+    { fulfillmentType: 'PICKUP', pickupType: 'SCHEDULED', pickupAt: '2026-09-09T16:30:00.000Z' },
+    { fulfillmentType: 'DINE_IN', pickupType: 'ASAP' },
+    { fulfillmentType: 'DINE_IN', pickupType: 'SCHEDULED', pickupAt: '2026-09-09T16:30:00.000Z' },
+  ];
+  for (const [index, selection] of combinations.entries()) {
+    await assert.rejects(
+      createCheckoutRequest({ ...baseRequest, ...selection }, CLOSED_NOW),
+      (error) => {
+        assert.equal(error.status, 409);
+        assert.equal(error.code, 'ORDERING_CLOSED');
+        assert.match(error.message, /currently closed/i);
+        assert.equal(error.data.availability.isOpen, false);
+        assert.equal(error.data.availability.nextOpenAt, '2026-09-09T16:00:00.000Z');
+        return true;
+      }
+    );
+    await assert.rejects(
+      createPaymentRequest({
+        ...baseRequest,
+        ...selection,
+        paymentIdempotencyKey: `closed-payment-key-${index}`,
+        sourceId: 'cnon:card-source-token',
+        tipAmount: 163,
+      }, CLOSED_NOW),
+      (error) => error.status === 409 && error.code === 'ORDERING_CLOSED'
+    );
+  }
+
+  assert.equal(calls.some((call) => call.url.includes('/catalog/list')), false);
+  assert.equal(calls.some((call) => call.url.endsWith('/orders')), false);
+  assert.equal(calls.some((call) => call.url.endsWith('/payments')), false);
+});
+
+test('offers only open-hour pickup slots and sends scheduled pickup_at to Square', async () => {
+  const calls = [];
+  clearBusinessScheduleCache();
+  installSquareMock(calls);
+
+  const availability = await getOrderingAvailability(OPEN_NOW);
+  assert.equal(availability.isOpen, true);
+  assert.equal(availability.timeZone, 'America/Chicago');
+  assert.equal(availability.pickup.prepMinutes, 20);
+  assert.equal(availability.pickup.asapAvailable, true);
+  assert.ok(availability.pickup.slots.length > 0);
+  assert.ok(availability.pickup.slots.every((slot) => {
+    const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', {
+      timeZone: availability.timeZone,
+      weekday: 'short',
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+    }).formatToParts(new Date(slot.pickupAt)).filter((part) => part.type !== 'literal').map((part) => [part.type, part.value]));
+    const minutes = Number(parts.hour) * 60 + Number(parts.minute);
+    return parts.weekday !== 'Sun' && minutes >= 11 * 60 && minutes < 21 * 60;
+  }));
+
+  const pickupAt = availability.pickup.slots[0].pickupAt;
+  const checkout = await createCheckoutRequest({ ...baseRequest, pickupType: 'SCHEDULED', pickupAt }, OPEN_NOW);
+  const calculatedOrder = JSON.parse(calls.find((call) => call.url.endsWith('/orders/calculate')).options.body).order;
+  const pickupDetails = calculatedOrder.fulfillments[0].pickup_details;
+  assert.equal(pickupDetails.schedule_type, 'SCHEDULED');
+  assert.equal(pickupDetails.pickup_at, pickupAt);
+  assert.equal(pickupDetails.prep_time_duration, 'PT20M');
+  assert.deepEqual(checkout.pickup, { fulfillmentType: 'PICKUP', scheduleType: 'SCHEDULED', pickupAt, prepMinutes: 20 });
+});
+
+test('sends dine-in ASAP as a labeled Square pickup fulfillment', async () => {
+  const calls = [];
+  clearBusinessScheduleCache();
+  installSquareMock(calls);
+
+  const checkout = await createCheckoutRequest({ ...baseRequest, fulfillmentType: 'DINE_IN' }, OPEN_NOW);
+  const calculatedOrder = JSON.parse(calls.find((call) => call.url.endsWith('/orders/calculate')).options.body).order;
+  const fulfillment = calculatedOrder.fulfillments[0];
+  assert.equal(fulfillment.type, 'PICKUP');
+  assert.equal(fulfillment.pickup_details.schedule_type, 'ASAP');
+  assert.equal(fulfillment.pickup_details.prep_time_duration, 'PT20M');
+  assert.equal(fulfillment.pickup_details.note, 'DINE-IN — Customer will eat here\nPlease include extra napkins.');
+  assert.deepEqual(checkout.pickup, { fulfillmentType: 'DINE_IN', scheduleType: 'ASAP', pickupAt: null, prepMinutes: 20 });
+});
+
+test('sends dine-in scheduled as a labeled Square pickup fulfillment', async () => {
+  const calls = [];
+  clearBusinessScheduleCache();
+  installSquareMock(calls);
+
+  const availability = await getOrderingAvailability(OPEN_NOW);
+  const pickupAt = availability.pickup.slots[0].pickupAt;
+  const checkout = await createCheckoutRequest({
+    ...baseRequest,
+    fulfillmentType: 'DINE_IN',
+    pickupType: 'SCHEDULED',
+    pickupAt,
+  }, OPEN_NOW);
+  const calculatedOrder = JSON.parse(calls.find((call) => call.url.endsWith('/orders/calculate')).options.body).order;
+  const fulfillment = calculatedOrder.fulfillments[0];
+  assert.equal(fulfillment.type, 'PICKUP');
+  assert.equal(fulfillment.pickup_details.schedule_type, 'SCHEDULED');
+  assert.equal(fulfillment.pickup_details.pickup_at, pickupAt);
+  assert.equal(fulfillment.pickup_details.prep_time_duration, 'PT20M');
+  assert.equal(fulfillment.pickup_details.note, 'DINE-IN — Customer will eat here\nPlease include extra napkins.');
+  assert.deepEqual(checkout.pickup, { fulfillmentType: 'DINE_IN', scheduleType: 'SCHEDULED', pickupAt, prepMinutes: 20 });
+});
+
+test('rejects a scheduled pickup outside Square business hours before order creation', async () => {
+  const calls = [];
+  clearBusinessScheduleCache();
+  installSquareMock(calls);
+
+  await assert.rejects(
+    createCheckoutRequest({
+      ...baseRequest,
+      pickupType: 'SCHEDULED',
+      pickupAt: '2026-09-13T17:00:00.000Z', // Sunday at noon in Marshall.
+    }, OPEN_NOW),
+    (error) => error.status === 409 && error.code === 'INVALID_PICKUP_TIME'
+  );
+  assert.equal(calls.some((call) => call.url.includes('/catalog/list')), false);
+  assert.equal(calls.some((call) => call.url.endsWith('/orders')), false);
+});
+
+test('disables ASAP when preparation would run past closing', async () => {
+  const calls = [];
+  clearBusinessScheduleCache();
+  installSquareMock(calls);
+
+  const availability = await getOrderingAvailability(LATE_OPEN_NOW);
+  assert.equal(availability.isOpen, true);
+  assert.equal(availability.pickup.asapAvailable, false);
+  await assert.rejects(
+    createCheckoutRequest(baseRequest, LATE_OPEN_NOW),
+    (error) => error.status === 409 && error.code === 'INVALID_PICKUP_TIME' && /before closing/.test(error.message)
+  );
+  assert.equal(calls.some((call) => call.url.includes('/catalog/list')), false);
+  assert.equal(calls.some((call) => call.url.endsWith('/orders')), false);
 });
 
 test('rejects malformed payment tokens before creating Square data', async () => {
@@ -255,7 +473,7 @@ test('rejects malformed payment tokens before creating Square data', async () =>
       paymentIdempotencyKey: 'malformed-payment-key',
       sourceId: 'not-a-square-token',
       tipAmount: 163,
-    }),
+    }, OPEN_NOW),
     (error) => error.status === 400 && /payment token/.test(error.message)
   );
 
@@ -277,7 +495,7 @@ test('cancels an unpaid order after Square rejects payment and never writes cust
       paymentIdempotencyKey: 'rejected-payment-key',
       sourceId: 'cnon:card-source-token',
       tipAmount: 163,
-    }),
+    }, OPEN_NOW),
     (error) => error.status === 400 && error.code === 'PAYMENT_RETRY_ALLOWED'
   );
 
@@ -298,7 +516,7 @@ test('does not report success for an incomplete or mismatched Square payment', a
       paymentIdempotencyKey: 'incomplete-payment-key',
       sourceId: 'cnon:card-source-token',
       tipAmount: 163,
-    }),
+    }, OPEN_NOW),
     (error) => error.status === 502 && /completed payment/.test(error.message)
   );
 });
@@ -308,7 +526,7 @@ test('rejects missing required modifiers and unapproved tip amounts before charg
   installSquareMock(calls);
 
   await assert.rejects(
-    createCheckoutRequest({ ...baseRequest, cart: [{ variationId: 'VARIATION_TACO', quantity: 1 }] }),
+    createCheckoutRequest({ ...baseRequest, cart: [{ variationId: 'VARIATION_TACO', quantity: 1 }] }, OPEN_NOW),
     (error) => error.status === 400 && /Tortilla Choice/.test(error.message)
   );
 
@@ -318,7 +536,7 @@ test('rejects missing required modifiers and unapproved tip amounts before charg
       paymentIdempotencyKey: 'checkout-payment-key-2',
       sourceId: 'cnon:card-source-token',
       tipAmount: 999,
-    }),
+    }, OPEN_NOW),
     (error) => error.status === 400 && /tip option/.test(error.message)
   );
   assert.equal(calls.some((call) => call.url.endsWith('/payments')), false);
@@ -394,6 +612,35 @@ test('rate limits menu requests, ignores spoofed client IP headers, and protects
     assert.equal(crossSiteRequest.body.error, 'Content-Type must be application/json.');
     assert.equal(calls.length, callsBeforeCrossSiteRequest);
 
+    clearBusinessScheduleCache();
+    installSquareMock(calls, { location: locationClosedAt() });
+    const persistentCallsBeforeClosedRequests = calls.filter((call) => /\/orders$|\/payments$/.test(call.url)).length;
+    const closedAvailability = await requestServer(port, '/api/ordering-availability');
+    assert.equal(closedAvailability.status, 200);
+    assert.equal(closedAvailability.body.availability.isOpen, false);
+
+    const closedCheckout = await requestServer(port, '/api/checkout', '203.0.113.29', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(baseRequest),
+    });
+    assert.equal(closedCheckout.status, 409);
+    assert.equal(closedCheckout.body.code, 'ORDERING_CLOSED');
+
+    const closedPayment = await requestServer(port, '/api/payments', '203.0.113.30', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        ...baseRequest,
+        paymentIdempotencyKey: 'closed-payment-key',
+        sourceId: 'cnon:card-source-token',
+        tipAmount: 163,
+      }),
+    });
+    assert.equal(closedPayment.status, 409);
+    assert.equal(closedPayment.body.code, 'ORDERING_CLOSED');
+    assert.equal(calls.filter((call) => /\/orders$|\/payments$/.test(call.url)).length, persistentCallsBeforeClosedRequests);
+
     for (let index = 0; index < 10; index += 1) {
       const response = await requestServer(port, '/api/menu');
       assert.equal(response.status, 200);
@@ -406,7 +653,7 @@ test('rate limits menu requests, ignores spoofed client IP headers, and protects
     assert.equal(spoofedIp.status, 429);
 
     for (const pathname of ['/api/checkout', '/api/payments']) {
-      const requestsAlreadyCounted = pathname === '/api/checkout' ? 1 : 0;
+      const requestsAlreadyCounted = pathname === '/api/checkout' ? 2 : 1;
       for (let index = requestsAlreadyCounted; index < 10; index += 1) {
         const response = await requestServer(port, pathname, `203.0.113.${pathname === '/api/checkout' ? 27 : 28}`);
         assert.equal(response.status, 404);
